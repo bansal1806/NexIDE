@@ -20,7 +20,8 @@ import { useMonacoWorkspace } from './hooks/useMonacoWorkspace';
 
 // Services
 import { fetchFileContent } from './services/github';
-import { loadSettings, saveSettings } from './services/settings';
+import { loadSettings, saveSettings, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
+import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
 
 // Components
 import { FileExplorer }   from './components/FileExplorer';
@@ -73,10 +74,36 @@ export default function App() {
   const [workspaceFiles, setWorkspaceFiles] = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   
+  const [cloudMode, setCloudMode] = useState(false);
+  const [cloudProjects, setCloudProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null);
+
+  // ── Auth ─────────────────────────────────────────────────────────
+  const { user } = useAuth();
+
   // Persist settings
   useEffect(() => {
     saveSettings(settings);
-  }, [settings]);
+    if (user) {
+      persistSettingsToCloud(user.id, settings).catch(e => console.error(e));
+    }
+  }, [settings, user]);
+
+  // Initial Sync when user logs in
+  useEffect(() => {
+    if (user) {
+      syncSettingsWithCloud(user.id, settings, setSettings).catch(e => console.error(e));
+      loadCloudProjects();
+    } else {
+      setCloudProjects([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const loadCloudProjects = async () => {
+    const projects = await fetchProjects();
+    setCloudProjects(projects);
+  };
 
   const { 
     snapshots, currentIndex, currentSnapshot, previousSnapshot,
@@ -126,8 +153,7 @@ export default function App() {
 
   const isRunning = runStatus === 'running';
 
-  // ── Auth ─────────────────────────────────────────────────────────
-  const { user } = useAuth();
+  // ── Auth was moved up ─────────────────────────────────────────────
 
   // ── AI (Gemini) ───────────────────────────────────────────────────
   const gemini = useGemini();
@@ -207,12 +233,16 @@ export default function App() {
   }, [activeTabId]);
 
   const saveFile = useCallback(async () => {
-    if (!activeTab || !activeTab.handle) return;
+    if (!activeTab) return;
     try {
-      await fs.writeFile(activeTab.handle, activeTab.content);
+      if (cloudMode && activeProjectId) {
+        await saveFileToCloud(activeProjectId, activeTab.path, activeTab.name, activeTab.content, activeTab.lang);
+      } else if (activeTab.handle) {
+        await fs.writeFile(activeTab.handle, activeTab.content);
+      }
       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, dirty: false } : t));
     } catch (e) { console.error('Save failed:', e); }
-  }, [activeTab, activeTabId, fs]);
+  }, [activeTab, activeTabId, fs, cloudMode, activeProjectId]);
 
   const closeTab = useCallback((tabId, e) => {
     e?.stopPropagation();
@@ -264,6 +294,8 @@ export default function App() {
     const result = await fs.openFolder();
     if (result) {
       setGithubMode(false);
+      setCloudMode(false);
+      setActiveProjectId(null);
       setGithubInfo(null);
       setGithubTree([]);
       setTabs([]);
@@ -285,6 +317,8 @@ export default function App() {
     }
 
     setGithubMode(true);
+    setCloudMode(false);
+    setActiveProjectId(null);
     setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch, token: settings.githubToken });
     setGithubTree(info.tree);
     setTabs([]);
@@ -323,7 +357,43 @@ export default function App() {
       return [...prev, newTab];
     });
   }, [fs.fileTree]);
-  
+
+  const handleOpenCloudProject = useCallback(async (project) => {
+    setGithubMode(false);
+    setCloudMode(true);
+    setActiveProjectId(project.id);
+    setGithubInfo(null);
+    setGithubTree([]);
+    setTabs([]);
+    setActiveTabId(null);
+    clearSnapshots();
+    endDebug();
+
+    const files = await fetchProjectFiles(project.id);
+    
+    // Convert flat files array to a tree structure (assuming root level for simplicity here)
+    const tree = files.map(f => ({
+      name: f.name,
+      path: f.path,
+      kind: 'file',
+      _content: f.content
+    }));
+    
+    setWorkspaceFiles(files); // Might need a specialized cloud hook later
+    // Set tree somewhere so FileExplorer can read it
+    setGithubTree(tree); // Reuse github tree state for cloud tree for now to save state vars
+    setSidebarOpen(true);
+  }, [clearSnapshots, endDebug]);
+
+  const handleCreateCloudProject = useCallback(async () => {
+    if (!user) return setAuthOpen(true);
+    const name = window.prompt("Project Name:");
+    if (!name) return;
+    const p = await createProject(user.id, name);
+    await loadCloudProjects();
+    handleOpenCloudProject(p);
+  }, [user, handleOpenCloudProject]);
+
   // Custom hook that binds raw code models into Monaco's unified workspace
   useMonacoWorkspace(workspaceFiles, handleBackgroundModelChange);
 
@@ -358,8 +428,9 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [saveFile, runCode, runDebug, isDebugging, stepForward, clearSnapshots, endDebug]);
 
-  const fileTree = githubMode ? githubTree : fs.fileTree;
-  const rootName = githubMode ? (githubInfo ? `${githubInfo.owner}/${githubInfo.repo}` : 'GitHub') : fs.rootName;
+  const fileTree = cloudMode ? githubTree : (githubMode ? githubTree : fs.fileTree);
+  const activeProjectName = cloudProjects.find(p => p.id === activeProjectId)?.name;
+  const rootName = cloudMode ? activeProjectName : (githubMode ? (githubInfo ? `${githubInfo.owner}/${githubInfo.repo}` : 'GitHub') : fs.rootName);
   const hasFiles = fileTree.length > 0 || tabs.length > 0;
   const showWelcome = !hasFiles;
 
@@ -428,9 +499,14 @@ export default function App() {
                 onOpenFolder={handleOpenFolder}
                 onFileClick={openFileInTab}
                 activeFilePath={activeTab?.path}
-                onRefresh={fs.refreshTree}
+                onRefresh={cloudMode ? () => handleOpenCloudProject({id: activeProjectId}) : fs.refreshTree}
                 githubMode={githubMode}
                 githubInfo={githubInfo}
+                cloudMode={cloudMode}
+                cloudProjects={cloudProjects}
+                onOpenCloudProject={handleOpenCloudProject}
+                onCreateCloudProject={handleCreateCloudProject}
+                user={user}
               />
             </motion.div>
           )}

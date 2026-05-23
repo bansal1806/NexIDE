@@ -3,7 +3,7 @@ import { useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FolderOpen, Folder, File, FileCode, FileText, FileJson,
-  ChevronRight, ChevronDown, Plus, RotateCcw, X, AlertCircle
+  ChevronRight, ChevronDown, Plus, RotateCcw, X, AlertCircle, Cloud
 } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
 
@@ -106,15 +106,18 @@ function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMo
 export const FileExplorer = memo(function FileExplorer({
   fileTree, rootName, isLoading, onOpenFolder, onFileClick, activeFilePath,
   onRefresh, githubMode, githubInfo, onFetchContent,
+  cloudMode, cloudProjects, onOpenCloudProject, onCreateCloudProject, user
 }) {
   const hasTree = fileTree && fileTree.length > 0;
+  const [showCloudProjects, setShowCloudProjects] = useState(false);
 
   return (
     <div className="file-explorer" id="file-explorer">
       {/* Header */}
       <div className="explorer-header">
-        <span className="explorer-title">
-          {githubMode ? '⎇ ' : ''}{rootName || 'EXPLORER'}
+        <span className="explorer-title" onClick={() => setShowCloudProjects(!showCloudProjects)} style={{cursor: 'pointer'}}>
+          {cloudMode ? '☁ ' : (githubMode ? '⎇ ' : '')}{rootName || 'EXPLORER'}
+          <ChevronDown size={10} style={{ marginLeft: 4 }} />
         </span>
         <div style={{ display: 'flex', gap: 2 }}>
           {hasTree && (
@@ -132,7 +135,27 @@ export const FileExplorer = memo(function FileExplorer({
 
       {/* Content */}
       <div className="explorer-body">
-        {isLoading ? (
+        {showCloudProjects ? (
+          <div className="cloud-projects-view">
+            <div style={{ padding: '8px 12px', fontSize: 11, fontWeight: 'bold', color: 'var(--text-muted)' }}>
+              CLOUD WORKSPACES
+            </div>
+            {user ? (
+              <>
+                {cloudProjects.map(p => (
+                  <div key={p.id} className="file-tree-item" onClick={() => { onOpenCloudProject(p); setShowCloudProjects(false); }}>
+                    <Cloud size={12} style={{marginRight: 6}} /> {p.name}
+                  </div>
+                ))}
+                <button className="explorer-open-btn" style={{marginTop: 10}} onClick={onCreateCloudProject}>
+                  <Plus size={13} /> New Cloud Project
+                </button>
+              </>
+            ) : (
+              <div style={{ padding: 12, fontSize: 12, color: 'var(--text-muted)' }}>Sign in to use Cloud Workspaces</div>
+            )}
+          </div>
+        ) : isLoading ? (
           <div className="explorer-empty">
             <div className="explorer-spinner" />
             <span>Loading...</span>
@@ -141,13 +164,24 @@ export const FileExplorer = memo(function FileExplorer({
           <div className="explorer-empty">
             <div style={{ fontSize: 28, opacity: 0.3, marginBottom: 8 }}>📁</div>
             <span style={{ textAlign: 'center', lineHeight: 1.5 }}>
-              {githubMode ? 'No files loaded' : 'No folder open'}
+              {cloudMode ? 'Empty cloud project' : (githubMode ? 'No files loaded' : 'No folder open')}
             </span>
-            {!githubMode && (
+            {!githubMode && !cloudMode && (
               <button className="explorer-open-btn" onClick={onOpenFolder} id="btn-open-folder">
                 <FolderOpen size={13} />
                 Open Folder
               </button>
+            )}
+            {cloudMode && (
+               <button className="explorer-open-btn" onClick={() => {
+                 const name = window.prompt("New File Name (e.g. index.js):");
+                 if (name) {
+                    const node = { path: name, name, kind: 'file', _content: '' };
+                    onFileClick(node);
+                 }
+               }}>
+                 <Plus size={13} /> New File
+               </button>
             )}
           </div>
         ) : (
