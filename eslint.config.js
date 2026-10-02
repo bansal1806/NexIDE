@@ -32,6 +32,10 @@ export default defineConfig([
     languageOptions: { globals: globals.worker },
   },
   {
+    files: ['public/sw.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     // Node: Vercel functions, build config
     files: ['api/**/*.js', 'tests/**/*.js', '**/*.test.js', 'vite.config.js', 'eslint.config.js'],
     languageOptions: { globals: globals.node },

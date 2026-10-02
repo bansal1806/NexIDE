@@ -342,10 +342,38 @@ try {
     await ws.click('#btn-run-code');
     check('Workspace: JS imports between files (incl. .ts, .json)', await wsConsole(/multi #42/, 15000));
 
+    // Cross-file time travel: stepping into lib/math.js opens it and highlights the line
+    const stepInto = async (fileName) => {
+      await ws.click('#btn-debug-code');
+      await ws.waitForSelector('#debug-timeline', { timeout: 30000 });
+      // Done when the Run button is back from "Stop" (console text may be from an earlier run)
+      await ws.waitForFunction(() => document.querySelector('#btn-run-code')?.innerText.trim() === 'Run', null, { timeout: 60000 });
+      await ws.click('button[title="Jump to Start (Home)"]');
+      const total = Number(await ws.locator('.dtl-step-total').innerText());
+      for (let i = 0; i < total; i++) {
+        if ((await ws.locator('.dtl-line-badge').innerText().catch(() => '')).includes(fileName)) break;
+        await ws.click('button[title="Step Forward (→)"]');
+      }
+      await ws.waitForTimeout(600);
+      const badge = await ws.locator('.dtl-line-badge').innerText().catch(() => '');
+      const activeTabName = await ws.locator('.tab.active .tab-name').innerText().catch(() => '');
+      const highlighted = await ws.locator('.debug-line-highlight').count();
+      await ws.keyboard.press('Escape');
+      return { badge, activeTabName, highlighted };
+    };
+    const jsDbg = await stepInto('math.js');
+    check('Debug: JS steps into an imported file (opens it, highlights line)',
+      jsDbg.badge.includes('math.js') && jsDbg.activeTabName === 'math.js' && jsDbg.highlighted > 0, JSON.stringify(jsDbg));
+
     await ws.click('.file-tree-item[title="main.py"]');
     await ws.waitForTimeout(500);
     await ws.click('#btn-run-code');
     check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
+
+    const pyDbg = await stepInto('helper.py');
+    check('Debug: Python steps into an imported module (opens it, highlights line)',
+      pyDbg.badge.includes('helper.py') && pyDbg.activeTabName === 'helper.py' && pyDbg.highlighted > 0, JSON.stringify(pyDbg));
+    await ws.click('.file-tree-item[title="main.py"]');
 
     // The Input box belongs to the file it was typed for
     if (!(await ws.locator('#console-stdin').isVisible().catch(() => false))) await ws.click('#btn-toggle-stdin');
@@ -395,16 +423,52 @@ try {
     }
   }
 
+  // ── Offline (service worker; production build only) ──
+  if (server) {
+    const offlineContext = await browser.newContext({ viewport: { width: 1500, height: 900 } });
+    const off = await offlineContext.newPage();
+    const offConsole = (re, timeout) => off.waitForFunction(
+      (src) => new RegExp(src).test(document.querySelector('#console-panel')?.innerText || ''), re.source, { timeout }
+    ).then(() => true, () => false);
+    try {
+      await off.goto(BASE);
+      await off.evaluate(() => navigator.serviceWorker.ready);
+      await off.reload(); // now controlled by the service worker
+      // Warm the caches the way a user would: open the editor, run JS and Python once
+      await off.click('#welcome-template-py');
+      await off.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+      await off.waitForTimeout(500);
+      await off.click('#btn-run-code');
+      await offConsole(/✓ Completed/, 90000);
+
+      await offlineContext.setOffline(true);
+      await off.reload();
+      await off.click('#welcome-template-py');
+      await off.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+      await off.waitForTimeout(500);
+      await off.evaluate(() => window.monaco.editor.getEditors()[0].setValue('print("offline", sum(range(5)))'));
+      await off.click('#btn-run-code');
+      const pyOffline = await offConsole(/offline 10/, 60000);
+      const isolated = await off.evaluate(() => self.crossOriginIsolated === true);
+      check('Offline: app, editor and Python run without network (still isolated)', pyOffline && isolated, `py=${pyOffline} isolated=${isolated}`);
+    } finally {
+      await offlineContext.close();
+    }
+  }
+
   // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
   await openTemplate('py');
-  await setCode('print("first")');
+  await setCode('print("first-run")');
   await run();
-  await waitConsole(/✓ Completed/, 90000);
-  await setCode('print("second")');
+  await waitConsole(/first-run[\s\S]*✓ Completed/, 90000);
+  await setCode('print("second-run")');
   await run();
-  await waitConsole(/✓ Completed/, 30000);
+  // Wait for *this* run's output — "✓ Completed" from the first run may still be on screen
+  const secondDone = await waitConsole(/second-run[\s\S]*(✓ Completed|✗)/, 60000);
   const secondRun = await consoleText();
-  check('Python: repeated runs rebuild the workspace cleanly', /second/.test(secondRun) && !/Resource busy|Could not load workspace/.test(secondRun));
+  check('Python: repeated runs rebuild the workspace cleanly',
+    secondDone && !/first-run/.test(secondRun) && !/Resource busy|Could not load workspace/.test(secondRun),
+    secondDone ? '' : `console: ${secondRun.replace(/\s+/g, ' ').slice(0, 200)}`);
 
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));

@@ -169,19 +169,7 @@ export async function executeJs(code, {
     }
   }
 
-  let moduleScope = null;
-  let source;
-  try {
-    let script = code;
-    if (isModule) {
-      script = toCommonJS(code, path.replace(/\.(ts|mts|cts)$/, '.js'));
-      moduleScope = createModuleSystem(files, fakeConsole, packages).entry(path);
-    }
-    source = debug ? instrumentJS(script) : (checkSyntax(script), script);
-  } catch (err) {
-    return { ok: false, error: `SyntaxError: ${err.message}`, line: err.loc?.line ?? null, steps: 0 };
-  }
-
+  // ── Debug recording (one set of helpers per file, so steps know where they are) ──
   let stepCount = 0;
   let pending = [];
   const callStack = [];
@@ -190,7 +178,7 @@ export async function executeJs(code, {
     pending = [];
   };
 
-  const helpers = {
+  const makeHelpers = (file) => ({
     __record(line, state) {
       if (++stepCount > maxSteps) {
         throw new Error(`Debugger: exceeded ${maxSteps} steps — possible infinite loop.`);
@@ -202,6 +190,7 @@ export async function executeJs(code, {
         clean[k] = snapshotValue(v);
       }
       pending.push({
+        file,
         line,
         state: clean,
         callStack: callStack.map(f => ({ ...f })),
@@ -212,13 +201,27 @@ export async function executeJs(code, {
     __cap(getter) {
       try { return getter(); } catch { return CAP_MISSING; }
     },
-    __enter(name, line) { callStack.push({ name, line }); },
+    __enter(name, line) { callStack.push({ name, line, file }); },
     __exit() { callStack.pop(); },
     __exitWith(value) { callStack.pop(); return value; },
-  };
+  });
+
+  let moduleScope = null;
+  let source;
+  try {
+    let script = code;
+    if (isModule) {
+      script = toCommonJS(code, path.replace(/\.(ts|mts|cts)$/, '.js'));
+      moduleScope = createModuleSystem(files, fakeConsole, packages,
+        debug ? { instrument: instrumentJS, helpersFor: makeHelpers } : null).entry(path);
+    }
+    source = debug ? instrumentJS(script) : (checkSyntax(script), script);
+  } catch (err) {
+    return { ok: false, error: `SyntaxError: ${err.message}`, line: err.loc?.line ?? null, steps: 0 };
+  }
 
   try {
-    const scope = { console: fakeConsole, ...(moduleScope || {}), ...helpers };
+    const scope = { console: fakeConsole, ...(moduleScope || {}), ...makeHelpers(path) };
     const fn = new AsyncFunction(...Object.keys(scope), source);
     await fn(...Object.values(scope));
     flush();

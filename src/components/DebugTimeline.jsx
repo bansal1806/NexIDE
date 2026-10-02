@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef } from 'react';
+import { breakpointKey } from '../hooks/useDebugger';
 // eslint-disable-next-line no-unused-vars
 import { motion } from 'framer-motion';
 import {
@@ -180,7 +181,7 @@ export const DebugTimeline = memo(function DebugTimeline({
         {/* Current line display */}
         {currentLine && (
           <div className="dtl-line-badge">
-            Line {currentLine}
+            {currentSnap?.file && currentSnap.file !== snapshots[0]?.file ? `${currentSnap.file.split('/').pop()} · ` : ''}Line {currentLine}
           </div>
         )}
 
@@ -232,7 +233,7 @@ export const DebugTimeline = memo(function DebugTimeline({
 
           {/* Breakpoint markers */}
           {snapshots.map((snap, idx) => {
-            if (!breakpoints.has(snap.line)) return null;
+            if (!breakpoints.has(breakpointKey(snap.file, snap.line))) return null;
             const pos = total > 1 ? (idx / (total - 1)) * 100 : 50;
             return (
               <div

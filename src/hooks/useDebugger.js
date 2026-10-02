@@ -1,5 +1,9 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
+// Breakpoints are per file: "path:line"
+export const breakpointKey = (file, line) => `${file}:${line}`;
+const hits = (bps, snap) => !!snap && bps.has(breakpointKey(snap.file, snap.line));
+
 /**
  * Time-travel debugger state engine.
  * Records execution snapshots and provides playback, breakpoints,
@@ -145,7 +149,7 @@ export function useDebugger() {
   const focusFirstBreakpoint = useCallback(() => {
     const bps = breakpointsRef.current;
     if (bps.size === 0) return false;
-    const idx = snapshotsRef.current.findIndex(s => bps.has(s.line));
+    const idx = snapshotsRef.current.findIndex(s => hits(bps, s));
     if (idx === -1) return false;
     setCurrentIndex(idx);
     return true;
@@ -187,11 +191,12 @@ export function useDebugger() {
 
   // ── Breakpoints ──────────────────────────────────────────────────
 
-  const toggleBreakpoint = useCallback((line) => {
+  const toggleBreakpoint = useCallback((file, line) => {
+    const key = breakpointKey(file, line);
     setBreakpoints(prev => {
       const next = new Set(prev);
-      if (next.has(line)) next.delete(line);
-      else next.add(line);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }, []);
@@ -204,7 +209,7 @@ export function useDebugger() {
   const jumpToNextBreakpoint = useCallback(() => {
     if (breakpoints.size === 0) return;
     for (let i = currentIndex + 1; i < snapshots.length; i++) {
-      if (breakpoints.has(snapshots[i].line)) {
+      if (hits(breakpoints, snapshots[i])) {
         setCurrentIndex(i);
         return;
       }
@@ -214,7 +219,7 @@ export function useDebugger() {
   const jumpToPrevBreakpoint = useCallback(() => {
     if (breakpoints.size === 0) return;
     for (let i = currentIndex - 1; i >= 0; i--) {
-      if (breakpoints.has(snapshots[i].line)) {
+      if (hits(breakpoints, snapshots[i])) {
         setCurrentIndex(i);
         return;
       }
@@ -245,7 +250,7 @@ export function useDebugger() {
           }
           const next = prev + 1;
           // Pause when playback reaches a breakpoint line
-          if (breakpointsRef.current.has(snaps[next]?.line)) setIsPlaying(false);
+          if (hits(breakpointsRef.current, snaps[next])) setIsPlaying(false);
           return next;
         });
       }, interval);
