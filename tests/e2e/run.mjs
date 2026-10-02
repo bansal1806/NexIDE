@@ -4,7 +4,7 @@
 //   E2E_BROWSER=chrome|msedge                                 → pick the browser channel
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -214,6 +214,13 @@ try {
   await run();
   check('TypeScript: transpiled and run', await waitConsole(/ts 42/));
 
+  // npm packages through esm.sh (inside the locked-down worker, under its CSP)
+  await page.selectOption('#language-select', 'javascript');
+  await setCode(`import { capitalize, chunk } from 'lodash-es';\nimport dayjs from 'dayjs';\nconsole.log('npm', capitalize('nexide'), JSON.stringify(chunk([1, 2, 3, 4], 2)), dayjs('2026-01-02').format('YYYY/MM/DD'));`);
+  await run();
+  check('JS: npm packages via esm.sh (named + default imports)', await waitConsole(/npm Nexide \[\[1,2\],\[3,4\]\] 2026\/01\/02/, 30000));
+  await page.selectOption('#language-select', 'typescript');
+
   // The bundled TS language worker runs under the strict CSP: a type error yields a marker
   await setCode(`const n: number = "not a number";`);
   const tsMarker = await page.waitForFunction(
@@ -339,8 +346,53 @@ try {
     await ws.waitForTimeout(500);
     await ws.click('#btn-run-code');
     check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
+
+    // The Input box belongs to the file it was typed for
+    if (!(await ws.locator('#console-stdin').isVisible().catch(() => false))) await ws.click('#btn-toggle-stdin');
+    await ws.fill('#console-stdin', 'for-python');
+    await ws.click('.file-tree-item[title="main.js"]');
+    const jsInput = await ws.inputValue('#console-stdin');
+    await ws.click('.file-tree-item[title="main.py"]');
+    const pyInput = await ws.inputValue('#console-stdin');
+    const stored = await ws.evaluate(() => JSON.parse(localStorage.getItem('nexide:stdin') || '{}'));
+    check('stdin: Input box is per file and remembered', jsInput === '' && pyInput === 'for-python' && stored['main.py'] === 'for-python',
+      `js=${JSON.stringify(jsInput)} py=${JSON.stringify(pyInput)}`);
     await ws.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── Deploy skew: a lazy chunk from the old deployment is gone (local build only) ──
+  if (server) {
+    const assetsDir = join(server.config.root, server.config.build.outDir, 'assets');
+    const chunk = readdirSync(assetsDir).find(f => /^CodeMap-.*\.js$/.test(f));
+    // Own context = own HTTP cache (the main page already loaded this chunk)
+    const staleContext = await browser.newContext({ viewport: { width: 1500, height: 900 } });
+    const stale = await staleContext.newPage();
+    await stale.goto(BASE);
+    await stale.click('#welcome-template-js');
+    await stale.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+    await stale.waitForTimeout(500);
+    renameSync(join(assetsDir, chunk), join(assetsDir, `${chunk}.gone`));
+    try {
+      const missing = await stale.request.get(new URL(`/assets/${chunk}`, BASE).href);
+      check('Deploy skew: missing asset is a 404, not index.html',
+        missing.status() === 404 && !/text\/html/.test(missing.headers()['content-type'] || ''));
+
+      // Unsaved work → no auto-reload; the panel offers Reload and the status bar says why
+      await stale.evaluate(() => window.monaco.editor.getEditors()[0].trigger('e2e', 'type', { text: '// edit\n' }));
+      let reloaded = false;
+      stale.on('framenavigated', f => { if (f === stale.mainFrame()) reloaded = true; });
+      await stale.click('#btn-toggle-map');
+      const offered = await stale.waitForSelector('#btn-reload-app', { timeout: 10000 }).then(() => true, () => false);
+      await stale.waitForFunction(() => /NexIDE was updated/.test(document.querySelector('.statusbar')?.innerText || ''), null, { timeout: 5000 }).catch(() => {});
+      const status = await stale.locator('.statusbar').innerText().catch(() => '');
+      check('Deploy skew: unsaved work is kept; Reload offered instead of a crash',
+        offered && !reloaded && /NexIDE was updated/.test(status),
+        `offered=${offered} reloaded=${reloaded} status=${/NexIDE was updated/.test(status)}`);
+    } finally {
+      renameSync(join(assetsDir, `${chunk}.gone`), join(assetsDir, chunk));
+      await staleContext.close();
+    }
   }
 
   // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)

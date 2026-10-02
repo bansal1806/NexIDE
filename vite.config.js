@@ -1,6 +1,6 @@
-import { readFileSync, createReadStream } from 'node:fs'
+import { readFileSync, createReadStream, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, extname } from 'node:path'
+import { dirname, join, extname, resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -40,15 +40,26 @@ function vercelApiDev() {
 // CSP is exercised locally (npm run test:e2e). The sources used in vercel.json are
 // plain regexes once anchored, which is all this needs to support.
 function vercelHeadersPreview() {
-  const rules = JSON.parse(readFileSync(new URL('./vercel.json', import.meta.url), 'utf8')).headers || [];
-  const compiled = rules.map(r => ({ re: new RegExp(`^${r.source}$`), headers: r.headers }));
+  const vercel = JSON.parse(readFileSync(new URL('./vercel.json', import.meta.url), 'utf8'));
+  const compiled = (vercel.headers || []).map(r => ({ re: new RegExp(`^${r.source}$`), headers: r.headers }));
+  const rewrites = (vercel.rewrites || []).map(r => new RegExp(`^${r.source}$`));
   return {
     name: 'nexide-vercel-headers-preview',
     configurePreviewServer(server) {
+      const outDir = resolve(server.config.root, server.config.build.outDir);
       server.middlewares.use((req, res, next) => {
         const path = (req.url || '/').split('?')[0];
         for (const { re, headers } of compiled) {
           if (re.test(path)) headers.forEach(h => res.setHeader(h.key, h.value));
+        }
+        // Like Vercel: a missing file is only rewritten to index.html if a rewrite matches it
+        let exists = true;
+        try { exists = existsSync(join(outDir, decodeURIComponent(path))); } catch { exists = false; }
+        if (!exists && !rewrites.some(re => re.test(path))) {
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'text/plain');
+          res.end('Not found');
+          return;
         }
         next();
       });

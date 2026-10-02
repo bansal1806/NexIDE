@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { executeJs } from './executeJs';
-import { resolveSpecifier, usesModules } from './modules';
+import { resolveSpecifier, usesModules, collectBareImports, isValidPackageSpec } from './modules';
 
 async function run(code, opts) {
   const logs = [];
@@ -50,8 +50,7 @@ describe('multi-file execution', () => {
     expect(logs).toEqual(['A B A']);
   });
 
-  it('explains bare (npm) imports and missing files', async () => {
-    expect((await run("import _ from 'lodash';", { path: 'src/app.js', files })).result.error).toMatch(/only relative imports/);
+  it('explains missing workspace files', async () => {
     expect((await run("import x from './nope.js';", { path: 'src/app.js', files })).result.error).toMatch(/Cannot find module "\.\/nope\.js"/);
   });
 
@@ -72,5 +71,52 @@ describe('multi-file execution', () => {
     const { result, logs } = await run('const module = 1;\nconst require = 2;\nconsole.log(module + require);');
     expect(result.ok).toBe(true);
     expect(logs).toEqual(['3']);
+  });
+});
+
+describe('npm packages (bare imports)', () => {
+  // Stand-in for import('https://esm.sh/…'): ES module namespaces
+  const fakeRegistry = {
+    'tiny-math': { default: (a) => a * 10, square: (x) => x * x },
+    '@scope/greet@1.2.0': { greet: (n) => `hi ${n}` },
+    'lodash/fp': { default: { identity: (x) => x } },
+  };
+  const loads = [];
+  const loadPackage = async (spec) => {
+    loads.push(spec);
+    if (!(spec in fakeRegistry)) throw new Error(`404 ${spec}`);
+    return fakeRegistry[spec];
+  };
+
+  it('collects bare imports transitively through workspace files', () => {
+    const files = { 'lib/a.js': "import x from 'tiny-math';\nexport * from './b.js';", 'lib/b.js': "export { greet } from '@scope/greet@1.2.0';" };
+    const bare = collectBareImports("import { y } from './lib/a.js';\nimport 'side-effect';\nconst s = 'import x from \"not-real\"';", 'main.js', files);
+    expect(bare.sort()).toEqual(['@scope/greet@1.2.0', 'side-effect', 'tiny-math']);
+  });
+
+  it('validates package names', () => {
+    expect(isValidPackageSpec('lodash')).toBe(true);
+    expect(isValidPackageSpec('@scope/pkg@^1.2/sub/path')).toBe(true);
+    expect(isValidPackageSpec('https://evil.example/x')).toBe(false);
+    expect(isValidPackageSpec('../../etc')).toBe(false);
+    expect(isValidPackageSpec('a b')).toBe(false);
+  });
+
+  it('supports default, named and subpath imports, also from workspace modules', async () => {
+    loads.length = 0;
+    const files = { 'util.js': "import { greet } from '@scope/greet@1.2.0';\nexport const hello = () => greet('ada');" };
+    const code = "import times10, { square } from 'tiny-math';\nimport fp from 'lodash/fp';\nimport { hello } from './util.js';\nconsole.log(times10(square(2)), fp.identity('ok'), hello());";
+    const { result, logs } = await run(code, { path: 'main.js', files, loadPackage });
+    expect(result.ok).toBe(true);
+    expect(logs.at(-1)).toBe('40 ok hi ada');
+    expect(logs.filter(l => /Loading .* from esm\.sh/.test(l))).toHaveLength(3);
+    expect(loads.sort()).toEqual(['@scope/greet@1.2.0', 'lodash/fp', 'tiny-math']);
+  });
+
+  it('rejects invalid package names before fetching anything', async () => {
+    loads.length = 0;
+    const { result } = await run("import x from 'https://evil.example/x.js';", { loadPackage });
+    expect(result.error).toMatch(/Invalid package name/);
+    expect(loads).toHaveLength(0);
   });
 });

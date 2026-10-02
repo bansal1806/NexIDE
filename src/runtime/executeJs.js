@@ -1,5 +1,8 @@
 import { checkSyntax, instrumentJS } from './instrument';
-import { usesModules, toCommonJS, createModuleSystem } from './modules';
+import { usesModules, toCommonJS, createModuleSystem, collectBareImports, isValidPackageSpec, PACKAGE_CDN } from './modules';
+
+// Browser: native dynamic import of the ESM build (sandboxed worker; esm.sh only, per CSP)
+const defaultLoadPackage = (spec) => import(/* @vite-ignore */ `${PACKAGE_CDN}${spec}`);
 
 const CAP_MISSING = Symbol('missing');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -131,21 +134,48 @@ function makeConsole(emit) {
  * @param {Record<string, string>} [opts.files]  workspace files available to `import`
  * @returns {Promise<{ ok: boolean, error?: string, line?: number|null, steps: number }>}
  */
-export async function executeJs(code, { debug = false, maxSteps = DEFAULT_MAX_STEPS, onLog, onSteps, path = 'main.js', files = {} } = {}) {
+export async function executeJs(code, {
+  debug = false, maxSteps = DEFAULT_MAX_STEPS, onLog, onSteps, path = 'main.js', files = {},
+  loadPackage = defaultLoadPackage,
+} = {}) {
   let lastLog = null;
   const emit = (type, text) => { lastLog = text; onLog?.(type, text); };
   const fakeConsole = makeConsole(emit);
 
   // import/export → CommonJS + workspace require() (only when the code uses modules, so plain
   // scripts can still declare their own `require` / `module` / `exports`)
+  const isModule = usesModules(code);
+  if (isModule) {
+    try {
+      checkSyntax(code, 'module');
+    } catch (err) {
+      return { ok: false, error: `SyntaxError: ${err.message}`, line: err.loc?.line ?? null, steps: 0 };
+    }
+  }
+
+  // npm packages: fetch every bare import up front (require() is synchronous)
+  const packages = {};
+  if (isModule) {
+    for (const spec of collectBareImports(code, path, files)) {
+      if (!isValidPackageSpec(spec)) {
+        return { ok: false, error: `Invalid package name "${spec}"`, line: null, steps: 0 };
+      }
+      emit('system', `📦 Loading ${spec} from esm.sh…`);
+      try {
+        packages[spec] = await loadPackage(spec);
+      } catch (err) {
+        return { ok: false, error: `Could not load package "${spec}" from esm.sh: ${err?.message || err}`, line: null, steps: 0 };
+      }
+    }
+  }
+
   let moduleScope = null;
   let source;
   try {
     let script = code;
-    if (usesModules(code)) {
-      checkSyntax(code, 'module');
+    if (isModule) {
       script = toCommonJS(code, path.replace(/\.(ts|mts|cts)$/, '.js'));
-      moduleScope = createModuleSystem(files, fakeConsole).entry(path);
+      moduleScope = createModuleSystem(files, fakeConsole, packages).entry(path);
     }
     source = debug ? instrumentJS(script) : (checkSyntax(script), script);
   } catch (err) {

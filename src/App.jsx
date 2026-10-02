@@ -38,6 +38,7 @@ import { GitHubModal }    from './components/GitHubModal';
 import { WelcomeScreen }  from './components/WelcomeScreen';
 import { CommandPalette } from './components/CommandPalette';
 import { AuthModal }      from './components/AuthModal';
+import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
 
 // Heavy pieces (Monaco, d3, sucrase) load on demand
 const Editor      = lazy(() => import('./components/Editor'));
@@ -228,7 +229,27 @@ export default function App() {
 
   // ── Cursor / editor ──────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-  const [stdinText, setStdinText] = useState('');
+  // Program input (console "Input" box), remembered per file across reloads
+  const STDIN_KEY = 'nexide:stdin';
+  const [stdinByPath, setStdinByPath] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(STDIN_KEY)) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(STDIN_KEY, JSON.stringify(stdinByPath)); } catch { /* storage full/blocked */ }
+  }, [stdinByPath]);
+  const stdinText = activeTab ? (stdinByPath[activeTab.path] || '') : '';
+  const setStdinText = useCallback((text) => {
+    const path = activeTabRef.current?.path;
+    if (!path) return;
+    setStdinByPath(prev => {
+      const next = { ...prev };
+      delete next[path];
+      if (text) next[path] = text.slice(0, 10_000); // re-insert last = most recently used
+      const keys = Object.keys(next);
+      keys.slice(0, Math.max(0, keys.length - 50)).forEach(k => delete next[k]);
+      return next;
+    });
+  }, []);
   const editorRef = useRef(null);
 
   // The active tab with the editor's *live* text. React state lags the editor by a render,
@@ -426,11 +447,11 @@ export default function App() {
   const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
-    const opts = { ...options, stdin: stdinLines(stdinText), path: tab.path, files: buildRunFiles(tab) };
+    const opts = { ...options, stdin: stdinLines(stdinByPath[tab.path] || ''), path: tab.path, files: buildRunFiles(tab) };
     return tab.lang === 'python'
       ? runPython(tab.content, opts)
       : runJs(tab.content, tab.lang, opts);
-  }, [runPython, runJs, stdinText, buildRunFiles]);
+  }, [runPython, runJs, stdinByPath, buildRunFiles]);
 
   const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 
@@ -580,6 +601,26 @@ export default function App() {
   }, [openFileInTab, runTab, notify]);
 
   // ── Global keyboard shortcuts ────────────────────────────────────
+  // A lazy chunk from the previous deployment is gone (new version deployed while this tab
+  // was open): reload transparently if nothing is unsaved, otherwise ask the user to save first.
+  useEffect(() => {
+    // Don't preventDefault(): that makes Vite resolve the import with `undefined`. Letting it
+    // reject means ChunkErrorBoundary sees the real error and offers Reload.
+    const onPreloadError = () => {
+      const RELOAD_KEY = 'nexide:reloaded-after-deploy';
+      let recentlyReloaded = false;
+      try { recentlyReloaded = Date.now() - Number(sessionStorage.getItem(RELOAD_KEY) || 0) < 60_000; } catch { /* storage blocked */ }
+      if (!tabsRef.current.some(t => t.dirty) && !recentlyReloaded) {
+        try { sessionStorage.setItem(RELOAD_KEY, String(Date.now())); } catch { /* storage blocked */ }
+        window.location.reload();
+      } else {
+        notify('error', 'NexIDE was updated — save your work, then reload the page.');
+      }
+    };
+    window.addEventListener('vite:preloadError', onPreloadError);
+    return () => window.removeEventListener('vite:preloadError', onPreloadError);
+  }, [notify]);
+
   const anyModalOpen = settingsOpen || paletteOpen || githubOpen || authOpen;
   useEffect(() => {
     const handler = (e) => {
@@ -733,7 +774,7 @@ export default function App() {
               )}
               {activeTab && (
                 <div className="editor-area">
-                  <Suspense fallback={<div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading editor…</div>}>
+                  <ChunkErrorBoundary name="Editor"><Suspense fallback={<div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading editor…</div>}>
                   <Editor
                     code={activeTab.content}
                     path={activeTab.path}
@@ -754,7 +795,7 @@ export default function App() {
                     minimap={settings.minimap}
                     fontLigatures={settings.fontLigatures}
                   />
-                  </Suspense>
+                  </Suspense></ChunkErrorBoundary>
                 </div>
               )}
             </div>
@@ -809,7 +850,7 @@ export default function App() {
               <button className="panel-close-btn" onClick={() => setRightPanel(null)} aria-label="Close panel">×</button>
             </div>
             <div className="panel-content">
-              <Suspense fallback={panelFallback}>
+              <ChunkErrorBoundary name="Panel" key={rightPanel}><Suspense fallback={panelFallback}>
                 <AnimatePresence mode="wait">
                   {rightPanel === 'preview' && (
                     <motion.div key="preview" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -847,7 +888,7 @@ export default function App() {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </Suspense>
+              </Suspense></ChunkErrorBoundary>
             </div>
           </div>
         )}
