@@ -403,6 +403,34 @@ try {
     const stored = await ws.evaluate(() => JSON.parse(localStorage.getItem('nexide:stdin') || '{}'));
     check('stdin: Input box is per file and remembered', jsInput === '' && pyInput === 'for-python' && stored['main.py'] === 'for-python',
       `js=${JSON.stringify(jsInput)} py=${JSON.stringify(pyInput)}`);
+
+    // Keyboard-accessible tab bar: arrows move focus + selection, Delete closes the focused tab
+    const tabState = () => ws.evaluate(() => ({
+      names: [...document.querySelectorAll('[role="tab"] .tab-name')].map(e => e.textContent),
+      active: document.querySelector('[role="tab"][aria-selected="true"] .tab-name')?.textContent,
+      focused: document.activeElement?.getAttribute('role') === 'tab' ? document.activeElement.querySelector('.tab-name')?.textContent : null,
+    }));
+    // Wait for the specific state after each key (focus moves on the next animation frame)
+    const waitTabs = (pred, arg) => ws.waitForFunction(pred, arg, { timeout: 5000 }).catch(() => {});
+    const focusedName = () => (document.activeElement?.getAttribute('role') === 'tab'
+      ? document.activeElement.querySelector('.tab-name')?.textContent : null);
+    await ws.focus('[role="tab"][aria-selected="true"]');
+    const before = await tabState();
+    await ws.keyboard.press('Home');
+    await waitTabs(`(${focusedName})() === ${JSON.stringify(before.names[0])}`);
+    const atHome = await tabState();
+    await ws.keyboard.press('ArrowRight');
+    await waitTabs(`(${focusedName})() === ${JSON.stringify(before.names[1])}`);
+    const afterRight = await tabState();
+    await ws.keyboard.press('Delete');
+    await waitTabs(`document.querySelectorAll('[role="tab"]').length === ${before.names.length - 1} && (${focusedName})() !== null`);
+    const afterDelete = await tabState();
+    check('Tabs: Home/ArrowRight move selection and focus; Delete closes the focused tab',
+      atHome.active === before.names[0] && atHome.focused === before.names[0] &&
+      afterRight.active === before.names[1] && afterRight.focused === before.names[1] &&
+      afterDelete.names.length === before.names.length - 1 && !afterDelete.names.includes(before.names[1]) &&
+      afterDelete.focused !== null,
+      JSON.stringify({ before: before.names, afterDelete: afterDelete.names, focused: afterDelete.focused }));
     await ws.close();
     rmSync(dir, { recursive: true, force: true });
   }

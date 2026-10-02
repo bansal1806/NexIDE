@@ -33,6 +33,8 @@ import { CommandPalette } from './components/CommandPalette';
 import { AuthModal }      from './components/AuthModal';
 import { BottomPanel, RightPanel } from './components/Panels';
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
+import { TabBar } from './components/TabBar';
+import { EDITOR_PANEL_ID, tabDomId } from './components/tabIds';
 
 // Monaco loads on demand (the panels lazy-load d3 and sucrase themselves)
 const Editor      = lazy(() => import('./components/Editor'));
@@ -349,25 +351,10 @@ export default function App() {
           ) : (
             <div className="editor-area-wrapper">
               {tabs.length > 0 && (
-                <div className="tab-bar" role="tablist">
-                  {tabs.map(tab => (
-                    <div
-                      key={tab.id}
-                      className={`tab ${tab.id === activeTab?.id ? 'active' : ''}`}
-                      onClick={() => setActiveTabId(tab.id)}
-                      role="tab"
-                      aria-selected={tab.id === activeTab?.id}
-                      title={tab.path}
-                    >
-                      <span className="tab-name">{tab.name}</span>
-                      {tab.dirty && <span className="tab-unsaved" aria-label="unsaved" />}
-                      <button className="tab-close" onClick={(e) => closeTab(tab.id, e)} aria-label={`Close ${tab.name}`}>×</button>
-                    </div>
-                  ))}
-                </div>
+                <TabBar tabs={tabs} activeId={activeTab?.id} onActivate={setActiveTabId} onClose={closeTab} />
               )}
               {activeTab && (
-                <div className="editor-area">
+                <div className="editor-area" id={EDITOR_PANEL_ID} role="tabpanel" aria-labelledby={tabDomId(activeTab.id)}>
                   <ChunkErrorBoundary name="Editor"><Suspense fallback={<div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading editor…</div>}>
                   <Editor
                     code={activeTab.content}
