@@ -24,3 +24,12 @@ dist-ssr
 *.sw?
 
 .env
+
+# Generated reports
+lint_output.txt
+eslint_report.json
+coverage
+
+# Environment
+.env.*
+!.env.example

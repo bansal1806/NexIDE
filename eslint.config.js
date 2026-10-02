@@ -26,4 +26,14 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // Web Workers
+    files: ['public/**/*.worker.js', 'src/**/*.worker.js'],
+    languageOptions: { globals: globals.worker },
+  },
+  {
+    // Node: Vercel functions, build config
+    files: ['api/**/*.js', 'tests/**/*.js', '**/*.test.js', 'vite.config.js', 'eslint.config.js'],
+    languageOptions: { globals: globals.node },
+  },
 ])

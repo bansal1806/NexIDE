@@ -28,7 +28,7 @@ graph TD
     end
 
     subgraph "Cognitive & LLM Layer"
-        E[Gemini 2.0 Flash] <--> F[Contextual Code Parser]
+        E[Gemini 2.5 Flash] <--> F[Contextual Code Parser]
         F <--> B
     end
 
@@ -61,7 +61,7 @@ Built on the absolute bleeding edge of web technology:
 | :--- | :--- |
 | **Core Framework** | **React 19** (Concurrent Rendering), **Vite 8** |
 | **Code Editor** | **Monaco-Editor** (VS Code Engine powering the core) |
-| **AI Integration** | **Google Gemini 2.0 Flash** (Streaming LLM) |
+| **AI Integration** | **Google Gemini 2.5 Flash** (configurable via `GEMINI_MODEL`) |
 | **Visual Mapping** | **D3.js** (Force-Directed Graphs for AST mapping) |
 | **Animations** | **Framer Motion** (Liquid, physics-based interactions) |
 | **Backend & Sync** | **Supabase**, **GitHub API**, **JWT Authentication** |
@@ -93,7 +93,8 @@ An integrated Gemini-powered assistant that "sees" what you see.
 
 - 🛰️ **Cognitive Structural Visualization**: Unlike static file trees, NexIDE uses a D3-powered force-directed graph to visualize the *logic* of your code, not just the location. This creates a "neural map" of your application.
 - 📈 **Execution Waveform Scrubber**: A unique UI component that builds a histogram of execution snapshots, letting you visually identify loops, high-frequency calls, and bottlenecks at a glance.
-- 🛡️ **Local-First Security**: Emphasizes running the heavy lifting in-browser, ensuring code privacy and instant responsiveness without server latency.
+- 🛡️ **Sandboxed Execution**: JavaScript/TypeScript run in a dedicated Web Worker and Python in a Pyodide worker — user code never touches the page, its storage, or your session, and Stop always works.
+- 🔐 **Privacy**: Code runs locally in your browser. It is sent to Google Gemini only when you use the AI assistant, and to Supabase only when you save to a cloud project. Personal API keys stay in your browser and are never synced.
 
 ---
 
@@ -114,14 +115,20 @@ Experience the future of coding right in your browser.
     npm install
     ```
 2.  **Environment Setup**:
-    Add your API keys to `.env`:
+    Copy `.env.example` to `.env` and fill it in:
     ```env
-    VITE_GEMINI_API_KEY=your_key_here
+    # Public (bundled into the browser) — publishable key ONLY, never service_role
     VITE_SUPABASE_URL=your_supabase_url
+    VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+    # Server only (optional): built-in AI for signed-in users
+    GEMINI_API_KEY=your_key_here
     ```
+    Then run `supabase_schema.sql` in the Supabase SQL editor (existing projects: `supabase/migrations/001_hardening.sql`).
 3.  **Run Development**:
     ```bash
-    npm run dev
+    npm run dev      # app + /api functions
+    npm test         # unit tests
+    npm run lint
     ```
 
 ---

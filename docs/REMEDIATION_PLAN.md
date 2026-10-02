@@ -1,0 +1,84 @@
+# NexIDE Remediation Plan — Phase 1
+
+Source: full codebase audit (2026-10-02). Each step lists the problem and the fix.
+Items marked **[YOU]** need dashboard access and cannot be done from code.
+
+## Step 0 — Secrets (do first)
+
+- [ ] **[YOU]** Supabase → Settings → API: revoke/roll the leaked `service_role` key (it is in the live bundle).
+- [ ] **[YOU]** Rotate the Gemini key that was in the first commit's `.env`.
+- [ ] **[YOU]** Vercel env: set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`; delete `VITE_SUPABASE_ANON_KEY`; optionally `GEMINI_API_KEY` (server-only). Redeploy.
+- [ ] **[YOU]** Local `.env`: delete the `VITE_SUPABASE_ANON_KEY` and `VITE_GEMINI_API_KEY` lines.
+- [ ] **[YOU]** Run `supabase/migrations/001_hardening.sql` (purges stored secrets, tightens RLS).
+- [ ] **[YOU]** `git update-ref -d refs/original/refs/heads/main` (+ remotes ref), `git reflog expire --expire=now --all && git gc --prune=now` to drop the old `.env` blob locally.
+- [x] Client reads only the publishable key and **refuses to start with a `service_role` JWT**.
+- [x] `.env.example` documents every variable; no secret uses a `VITE_` prefix.
+
+## Step 1 — Sandbox code execution
+
+- [x] JS/TS runs in a dedicated module Web Worker (no DOM, no `localStorage`, no session token), off the UI thread.
+- [x] Stop button terminates the worker (infinite loops no longer freeze the tab).
+- [x] Async output (timers/promises) is streamed; top-level `await` supported.
+- [x] TypeScript transpiled with Sucrase (line numbers preserved).
+
+## Step 2 — Debugger correctness
+
+- [x] Replace line/regex instrumentation with an AST (acorn) instrumenter — fixes TDZ ReferenceError, multi-line objects, method chains.
+- [x] Real call stack (function enter/exit) for JS; frame stack for Python.
+- [x] Breakpoints work: after recording, playhead jumps to first hit; next/prev-breakpoint controls; playback pauses at breakpoints.
+- [x] Python: step cap, robust locals serialization, isReady when Pyodide is actually loaded, Stop handler fixed, Pyodide 0.28.3.
+
+## Step 3 — AI
+
+- [x] With a user key, the browser calls Gemini directly (key never touches our server).
+- [x] `/api/generate` only uses the system key for **signed-in** users; input size limits; per-user rate limit; valid history.
+- [x] Model configurable (`GEMINI_MODEL`, default `gemini-2.5-flash`).
+- [x] Chat panel passes the key; code lenses fixed (regex bug).
+- [x] `/api` works in `npm run dev` via a Vite dev middleware.
+
+## Step 4 — Data integrity & settings
+
+- [x] Monaco commands use refs → Ctrl+S / Ctrl+Enter act on current content (was data loss).
+- [x] Secrets (`geminiApiKey`, `githubToken`) never synced to cloud.
+- [x] Cloud settings sync: fetch-then-persist, debounced; no more overwrite race.
+- [x] Settings modal uses a draft: Cancel reverts, Esc closes. Auto Save implemented. Monaco follows theme.
+
+## Step 5 — App wiring bugs
+
+- [x] `editorRef` prop mismatch (jump-to-line), console Clear, terminal close/run, Code Map / terminal open empty tabs, workspace model disposal, cloud nested tree + New File + refresh without data loss, error handling on cloud create, AuthContext without Supabase, timeline key capture inside editor, Code Map re-render cost, misc.
+
+## Step 6 — GitHub
+
+- [x] Use repo `default_branch`, UTF-8 decoding, URL-encoded paths, `.git` suffix, truncated-tree warning.
+
+## Step 7 — Preview
+
+- [x] Verify message source; escape `</script>`; TS transpiled in preview.
+
+## Step 8 — Database
+
+- [x] Migration: `(select auth.uid())` policies with explicit `WITH CHECK`, `owner_id` index, purge secrets from `user_settings`.
+
+## Step 9 — Hygiene, deps, tests
+
+- [x] Remove empty `server/`, stale logs, `test.cjs`, unused deps (`bcryptjs`, `jsonwebtoken`).
+- [x] dompurify override → patched version; lint clean; ESLint globals for workers / api.
+- [x] Lazy-load heavy panels (D3 map, preview, AI SDK) to shrink the main chunk.
+- [x] Security headers in `vercel.json`.
+- [x] Vitest unit tests: instrumenter, runner, GitHub URL parsing, Gemini history, settings sanitizing.
+- [x] README privacy claim corrected.
+
+## Verification (2026-10-02)
+
+- `npm run lint` — clean · `npm test` — 39/39 · `npm run build` — OK (main chunk 712 KB → 130 KB) · `npm audit` — 0 vulnerabilities
+- Browser E2E (Edge, headless) against both `vite dev` and the production build: 17/17 — JS/TS run, async output,
+  sandbox (no `localStorage`/DOM), Stop on infinite loop, syntax-error line, debugger (TDZ case, timeline, call stack),
+  code lenses, preview, Python run/traceback/debug/Stop, no page errors; in-editor Ctrl+Enter runs the latest edit.
+- Production bundle contains no `service_role` JWT.
+
+## Next phase (not in this pass)
+
+- Full Content-Security-Policy (needs testing against Monaco/Pyodide CDNs).
+- Durable rate limiting (Upstash/Vercel KV) instead of per-instance memory.
+- Encrypt user API keys at rest in the browser, or move them to a server-side vault.
+- E2E tests (Playwright) for run/debug/save flows.
