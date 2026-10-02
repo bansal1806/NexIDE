@@ -167,8 +167,17 @@ Safari lacks `credentialless`, so there the page isn't isolated and input falls 
   GitHub repos and cloud projects moved out of `App.jsx` (818 → 491 lines; 989 before Phase 7). No behaviour change.
 - Verification: lint clean · unit 74/74 · E2E 51/51.
 
+## Phase 9 — Workspace unit tests, accessible tab bar (branch `phase-9`)
+
+- [x] **`useWorkspace` unit tests** (jsdom + Testing Library, mocked file system / Monaco / network): template
+  names, open-once, tree resolution, binary guard, dirty + save, close confirmation, workspace keys, run-file
+  merge order and the 5 MB cap.
+- [x] **Accessible tab bar**: WAI-ARIA tabs with a roving tabindex — ←/→ (wrapping), Home/End, Delete closes the
+  focused tab, Enter/Space, middle-click; editor area is the labelled tabpanel. (Ctrl+W is reserved by browsers.)
+- Verification: lint clean · unit 88/88 · E2E 52/52 (twice).
+
 ## Ideas for a later phase
 
-- Unit tests for `useWorkspace` with a fake file system (today it is covered end-to-end only).
-- Keyboard-accessible tab bar (arrow keys between tabs, Ctrl+W to close).
+- Accessibility pass on the remaining panels (file tree keyboard navigation, focus traps in modals).
+- Visual regression snapshots for the main layouts in CI.
 - Restore a Supabase project for production sign-in and cloud workspaces (**[YOU]**, dashboard).
