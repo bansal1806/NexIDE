@@ -342,10 +342,37 @@ try {
     await ws.click('#btn-run-code');
     check('Workspace: JS imports between files (incl. .ts, .json)', await wsConsole(/multi #42/, 15000));
 
+    // Cross-file time travel: stepping into lib/math.js opens it and highlights the line
+    const stepInto = async (fileName) => {
+      await ws.click('#btn-debug-code');
+      await ws.waitForSelector('#debug-timeline', { timeout: 30000 });
+      await wsConsole(/✓ Completed|Recorded/, 60000);
+      await ws.click('button[title="Jump to Start (Home)"]');
+      const total = Number(await ws.locator('.dtl-step-total').innerText());
+      for (let i = 0; i < total; i++) {
+        if ((await ws.locator('.dtl-line-badge').innerText().catch(() => '')).includes(fileName)) break;
+        await ws.click('button[title="Step Forward (→)"]');
+      }
+      await ws.waitForTimeout(600);
+      const badge = await ws.locator('.dtl-line-badge').innerText().catch(() => '');
+      const activeTabName = await ws.locator('.tab.active .tab-name').innerText().catch(() => '');
+      const highlighted = await ws.locator('.debug-line-highlight').count();
+      await ws.keyboard.press('Escape');
+      return { badge, activeTabName, highlighted };
+    };
+    const jsDbg = await stepInto('math.js');
+    check('Debug: JS steps into an imported file (opens it, highlights line)',
+      jsDbg.badge.includes('math.js') && jsDbg.activeTabName === 'math.js' && jsDbg.highlighted > 0, JSON.stringify(jsDbg));
+
     await ws.click('.file-tree-item[title="main.py"]');
     await ws.waitForTimeout(500);
     await ws.click('#btn-run-code');
     check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
+
+    const pyDbg = await stepInto('helper.py');
+    check('Debug: Python steps into an imported module (opens it, highlights line)',
+      pyDbg.badge.includes('helper.py') && pyDbg.activeTabName === 'helper.py' && pyDbg.highlighted > 0, JSON.stringify(pyDbg));
+    await ws.click('.file-tree-item[title="main.py"]');
 
     // The Input box belongs to the file it was typed for
     if (!(await ws.locator('#console-stdin').isVisible().catch(() => false))) await ws.click('#btn-toggle-stdin');

@@ -55,8 +55,8 @@ self.nexideOutput = (stream, text) => {
   scheduleFlush();
 };
 
-self.nexideStep = (line, localsJson, stackJson) => {
-  stepBuffer.push({ line, state: JSON.parse(localsJson), callStack: JSON.parse(stackJson) });
+self.nexideStep = (file, line, localsJson, stackJson) => {
+  stepBuffer.push({ file, line, state: JSON.parse(localsJson), callStack: JSON.parse(stackJson) });
   if (stepBuffer.length >= 250) flush(); else scheduleFlush();
 };
 
@@ -101,9 +101,20 @@ def _nx_json(v, depth=0):
         r = '<unrepresentable>'
     return r if len(r) <= 500 else r[:500] + '…'
 
+_nx_entry = 'main.py'
+
+def _nx_user_file(filename):
+    """Workspace-relative path for user code (entry or imported workspace module), else None."""
+    if filename == '<exec>':
+        return _nx_entry
+    if filename.startswith(_NX_WS + '/'):
+        return filename[len(_NX_WS) + 1:]
+    return None
+
 def _nx_trace(frame, event, arg):
     global _nx_steps
-    if frame.f_code.co_filename != '<exec>':
+    file = _nx_user_file(frame.f_code.co_filename)
+    if file is None:
         return None
     if event == 'line':
         _nx_steps += 1
@@ -118,12 +129,13 @@ def _nx_trace(frame, event, arg):
         stack = []
         f = frame
         while f is not None:
-            if f.f_code.co_filename == '<exec>':
+            f_file = _nx_user_file(f.f_code.co_filename)
+            if f_file is not None:
                 name = f.f_code.co_name
-                stack.append({'name': '(module)' if name == '<module>' else name, 'line': f.f_lineno})
+                stack.append({'name': '(module)' if name == '<module>' else name, 'line': f.f_lineno, 'file': f_file})
             f = f.f_back
         stack.reverse()
-        js.nexideStep(frame.f_lineno, json.dumps(local_vars), json.dumps(stack))
+        js.nexideStep(file, frame.f_lineno, json.dumps(local_vars), json.dumps(stack))
     return _nx_trace
 
 def _nx_start(debug):
@@ -152,6 +164,8 @@ def _nx_sync_files(files, entry_path):
         with open(full, 'w', encoding='utf-8') as f:
             f.write(content)
     os.chdir(_NX_WS)
+    global _nx_entry
+    _nx_entry = entry_path or 'main.py'
     # Like "python path/to/main.py": the script's directory comes first on sys.path
     entry_dir = os.path.normpath(os.path.join(_NX_WS, os.path.dirname(entry_path or '')))
     for p in (_NX_WS, entry_dir):

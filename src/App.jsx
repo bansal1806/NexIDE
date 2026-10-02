@@ -188,6 +188,16 @@ export default function App() {
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
+  // Breakpoints are per file; the editor only sees (and toggles) the active file's lines
+  const activeBreakpointLines = useMemo(() => {
+    const prefix = `${activeTab?.path}:`;
+    return new Set([...breakpoints].filter(k => k.startsWith(prefix)).map(k => Number(k.slice(prefix.length))));
+  }, [breakpoints, activeTab?.path]);
+  const toggleActiveBreakpoint = useCallback((line) => {
+    const path = activeTabRef.current?.path;
+    if (path) toggleBreakpoint(path, line);
+  }, [toggleBreakpoint]);
+
   // ── UI panels / modals ───────────────────────────────────────────
   const [bottomPanel, setBottomPanel] = useState(null); // 'terminal' | 'console' | null
   const [rightPanel, setRightPanel]   = useState(null); // 'preview' | 'ai' | 'map' | 'debug' | null
@@ -316,6 +326,17 @@ export default function App() {
     setActiveTabId(tab.id);
     return tab;
   }, [fileTree, fs, githubMode, githubInfo, settings.githubToken, notify]);
+
+  // Time-travel follows execution into other workspace files (opens/activates their tab)
+  const followFile = isDebugging && !isRunning ? currentSnapshot?.file : null; // not while still recording
+  useEffect(() => {
+    if (!followFile || followFile === activeTabRef.current?.path) return;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (!cancelled) openFileInTab({ path: followFile, name: followFile.split('/').pop() });
+    });
+    return () => { cancelled = true; };
+  }, [followFile, openFileInTab]);
 
   const handleMapNodeClick = useCallback(async (node) => {
     if (node.type === 'folder') return;
@@ -785,9 +806,9 @@ export default function App() {
                     onSave={saveFile}
                     onAiAction={handleAiAction}
                     externalRef={editorRef}
-                    debugLine={isDebugging && currentSnapshot ? currentSnapshot.line : null}
-                    breakpoints={breakpoints}
-                    onToggleBreakpoint={toggleBreakpoint}
+                    debugLine={isDebugging && currentSnapshot && (!currentSnapshot.file || currentSnapshot.file === activeTab.path) ? currentSnapshot.line : null}
+                    breakpoints={activeBreakpointLines}
+                    onToggleBreakpoint={toggleActiveBreakpoint}
                     theme={settings.theme}
                     fontSize={settings.fontSize}
                     tabSize={settings.tabSize}

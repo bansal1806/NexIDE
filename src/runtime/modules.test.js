@@ -58,7 +58,7 @@ describe('multi-file execution', () => {
     const code = "import { add } from './math.js';\nconst x = add(1, 2);\nconsole.log(x);";
     const { result, steps } = await run(code, { path: 'src/app.js', files, debug: true });
     expect(result.ok).toBe(true);
-    expect(steps.find(s => s.line === 2)?.state.x).toBe(3);
+    expect(steps.find(s => s.file === 'src/app.js' && s.line === 2)?.state.x).toBe(3);
   });
 
   it('reports module syntax errors with the right line', async () => {
@@ -118,5 +118,21 @@ describe('npm packages (bare imports)', () => {
     const { result } = await run("import x from 'https://evil.example/x.js';", { loadPackage });
     expect(result.error).toMatch(/Invalid package name/);
     expect(loads).toHaveLength(0);
+  });
+});
+
+describe('cross-file debugging', () => {
+  it('records steps and stack frames with their file', async () => {
+    const files = { 'lib/calc.js': 'export function triple(n) {\n  const t = n * 3;\n  return t;\n}' };
+    const code = "import { triple } from './lib/calc.js';\nconst r = triple(4);\nconsole.log(r);";
+    const { result, steps } = await run(code, { path: 'main.js', files, debug: true });
+    expect(result.ok).toBe(true);
+    const inLib = steps.find(s => s.file === 'lib/calc.js' && s.line === 2);
+    expect(inLib?.state).toMatchObject({ n: 4, t: 12 });
+    expect(inLib.callStack.at(-1)).toMatchObject({ name: 'triple', file: 'lib/calc.js' });
+    expect(steps.find(s => s.file === 'main.js' && s.line === 2)?.state.r).toBe(12);
+    // file order: entry → library → back to entry
+    const files_ = steps.map(s => s.file);
+    expect(files_.indexOf('lib/calc.js')).toBeGreaterThan(files_.indexOf('main.js'));
   });
 });

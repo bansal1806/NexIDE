@@ -69,8 +69,10 @@ export function packageExports(namespace) {
  * @param {Record<string, string>} files  workspace path → source
  * @param {object} fakeConsole            console given to every module
  * @param {Record<string, object>} [packages]  preloaded npm packages (spec → module namespace)
+ * @param {{ instrument: (code: string) => string, helpersFor: (path: string) => object }|null} [debugHooks]
+ *        when debugging: instrument each workspace module and give it file-specific helpers
  */
-export function createModuleSystem(files, fakeConsole, packages = {}) {
+export function createModuleSystem(files, fakeConsole, packages = {}, debugHooks = null) {
   const cache = new Map(); // resolved path → module
 
   function makeRequire(fromPath) {
@@ -90,8 +92,11 @@ export function createModuleSystem(files, fakeConsole, packages = {}) {
         if (found.endsWith('.json')) {
           module.exports = JSON.parse(files[found]);
         } else {
-          const fn = new Function('require', 'module', 'exports', 'console', toCommonJS(files[found], found));
-          fn(makeRequire(found), module, module.exports, fakeConsole);
+          let source = toCommonJS(files[found], found);
+          const helpers = debugHooks ? debugHooks.helpersFor(found) : {};
+          if (debugHooks) source = debugHooks.instrument(source);
+          const fn = new Function('require', 'module', 'exports', 'console', ...Object.keys(helpers), source);
+          fn(makeRequire(found), module, module.exports, fakeConsole, ...Object.values(helpers));
         }
       } catch (err) {
         cache.delete(found);
