@@ -214,6 +214,13 @@ try {
   await run();
   check('TypeScript: transpiled and run', await waitConsole(/ts 42/));
 
+  // npm packages through esm.sh (inside the locked-down worker, under its CSP)
+  await page.selectOption('#language-select', 'javascript');
+  await setCode(`import { capitalize, chunk } from 'lodash-es';\nimport dayjs from 'dayjs';\nconsole.log('npm', capitalize('nexide'), JSON.stringify(chunk([1, 2, 3, 4], 2)), dayjs('2026-01-02').format('YYYY/MM/DD'));`);
+  await run();
+  check('JS: npm packages via esm.sh (named + default imports)', await waitConsole(/npm Nexide \[\[1,2\],\[3,4\]\] 2026\/01\/02/, 30000));
+  await page.selectOption('#language-select', 'typescript');
+
   // The bundled TS language worker runs under the strict CSP: a type error yields a marker
   await setCode(`const n: number = "not a number";`);
   const tsMarker = await page.waitForFunction(

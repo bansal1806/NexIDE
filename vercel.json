@@ -88,7 +88,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src *"
+          "value": "default-src 'none'; script-src 'self' 'unsafe-eval' https://esm.sh; connect-src *"
         },
         {
           "key": "Cross-Origin-Opener-Policy",

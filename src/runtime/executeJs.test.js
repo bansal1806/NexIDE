@@ -94,9 +94,9 @@ describe('normal execution', () => {
     expect(result.line).toBe(2);
   });
 
-  it('explains that npm (bare) imports are not available', async () => {
-    const { result } = await run('import x from "y";');
-    expect(result.error).toMatch(/only relative imports/);
+  it('reports npm packages that fail to load', async () => {
+    const { result } = await run('import x from "y";', { loadPackage: async () => { throw new Error('404'); } });
+    expect(result.error).toMatch(/Could not load package "y" from esm\.sh: 404/);
   });
 
   it('reports runtime errors', async () => {
