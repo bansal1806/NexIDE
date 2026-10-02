@@ -28,17 +28,17 @@ export function GitHubModal({ open, onClose, onLoad, githubToken }) {
     setLoading(true);
     setError(null);
     try {
-      const [info, tree] = await Promise.all([
-        fetchRepoInfo(parsed.owner, parsed.repo, githubToken),
-        fetchRepoTree(parsed.owner, parsed.repo, parsed.branch, githubToken),
-      ]);
+      const info = await fetchRepoInfo(parsed.owner, parsed.repo, githubToken);
+      const branch = parsed.branch || info.default_branch || 'main';
+      const { tree, truncated } = await fetchRepoTree(parsed.owner, parsed.repo, branch, githubToken);
       onLoad({
         owner: parsed.owner,
         repo:  parsed.repo,
-        branch: info.default_branch || parsed.branch,
+        branch,
         description: info.description,
         stars: info.stargazers_count,
         tree,
+        truncated,
       });
       onClose();
       setInput('');

@@ -42,7 +42,7 @@ users.forEach(user => {
 });
 `,
   python: `# Python in NexIDE ⚡
-# Note: Running in browser simulation mode
+# Runs in your browser via Pyodide (Ctrl+Enter)
 
 def fibonacci(n):
     if n <= 1:
@@ -145,174 +145,169 @@ body {
 `,
 };
 
-  export function Editor({
-  language, code, path, onChange, onRun, onSave, onCursorChange, onAiAction, editorRef: externalRef,
+// Monaco theme per app theme (backgrounds match the CSS variables in index.css)
+const MONACO_THEMES = {
+  'nexide-dark': 'nexide-dark',
+  'vs-dark': 'vs-dark',
+  aurora: 'nexide-aurora',
+  crimson: 'nexide-crimson',
+};
+
+const BASE_RULES = [
+  { token: 'comment',    foreground: '565870', fontStyle: 'italic' },
+  { token: 'keyword',    foreground: 'a855f7', fontStyle: 'bold' },
+  { token: 'string',     foreground: '6ee7b7' },
+  { token: 'number',     foreground: 'f97316' },
+  { token: 'delimiter',  foreground: '8b8fa8' },
+  { token: 'variable',   foreground: '00d4ff' },
+  { token: 'type',       foreground: 'fbbf24' },
+  { token: 'function',   foreground: '00d4ff' },
+  { token: 'identifier', foreground: 'e2e4ef' },
+];
+
+function themeColors(bg, surface, border, accent) {
+  return {
+    'editor.background':           bg,
+    'editor.foreground':           '#e2e4ef',
+    'editorLineNumber.foreground': '#3d3f57',
+    'editorLineNumber.activeForeground': '#8b8fa8',
+    'editor.selectionBackground':  `${accent}33`,
+    'editor.lineHighlightBackground': surface,
+    'editorCursor.foreground':     accent,
+    'editor.findMatchBackground':  `${accent}33`,
+    'editorWidget.background':     surface,
+    'editorWidget.border':         border,
+    'input.background':            surface,
+    'input.border':                border,
+    'focusBorder':                 accent,
+    'scrollbarSlider.background':  `${border}66`,
+    'scrollbarSlider.hoverBackground': '#3d3f5766',
+    'editorGutter.background':     bg,
+    'editorIndentGuide.background1': border,
+    'editorIndentGuide.activeBackground1': '#3d3f57',
+  };
+}
+
+// Lines that get AI code lenses: JS/TS functions, classes, arrow consts; Python def/class
+const LENS_PATTERN = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+([\w$]+)|class\s+([\w$]+)|(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[\w$]+\s*=>)|def\s+(\w+)\s*\()/;
+
+export function Editor({
+  language, code, path, onChange, onRun, onSave, onCursorChange, onAiAction, externalRef,
   fontSize = 13, tabSize = 2, wordWrap = 'off', minimap = true, fontLigatures = true,
+  theme = 'nexide-dark',
   debugLine = null,
-  breakpoints = new Set(),
+  breakpoints,
   onToggleBreakpoint,
 }) {
   const monacoRef = useRef(null);
-  const monacoInstanceRef = useRef(null);
   const codeLensProviderRef = useRef(null);
-  const debugDecorationsRef = useRef([]);
-  const breakpointDecorationsRef = useRef([]);
+  const debugDecorationsRef = useRef(null);
+  const breakpointDecorationsRef = useRef(null);
+
+  // Monaco commands are registered once at mount; route them through refs so they
+  // always call the latest callbacks (otherwise Ctrl+S would save stale content).
+  const callbacksRef = useRef({});
+  useEffect(() => {
+    callbacksRef.current = { onRun, onSave, onCursorChange, onAiAction, onToggleBreakpoint };
+  });
+
+  // Dispose the global code lens provider when the editor unmounts
+  useEffect(() => () => {
+    codeLensProviderRef.current?.dispose();
+    codeLensProviderRef.current = null;
+    if (externalRef) externalRef.current = null;
+  }, [externalRef]);
 
   function handleEditorDidMount(editor, monaco) {
     if (externalRef) externalRef.current = editor;
     monacoRef.current = editor;
-    monacoInstanceRef.current = monaco;
+    debugDecorationsRef.current = editor.createDecorationsCollection();
+    breakpointDecorationsRef.current = editor.createDecorationsCollection();
 
     // Keyboard shortcuts
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => { if (onRun) onRun(); });
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => { if (onSave) onSave(); });
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => callbacksRef.current.onRun?.());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => callbacksRef.current.onSave?.());
 
     // Cursor position listener
     editor.onDidChangeCursorPosition((e) => {
-      if (onCursorChange) onCursorChange({ line: e.position.lineNumber, col: e.position.column });
+      callbacksRef.current.onCursorChange?.({ line: e.position.lineNumber, col: e.position.column });
     });
 
-    // ── Breakpoint toggle on gutter click ────────────────────────
+    // Breakpoint toggle on gutter click
     editor.onMouseDown((e) => {
-      // e.target.type 2 = GUTTER_GLYPH_MARGIN, 3 = GUTTER_LINE_NUMBERS
-      if (e.target.type === 2 || e.target.type === 3) {
+      const T = monaco.editor.MouseTargetType;
+      if (e.target.type === T.GUTTER_GLYPH_MARGIN || e.target.type === T.GUTTER_LINE_NUMBERS) {
         const lineNumber = e.target.position?.lineNumber;
-        if (lineNumber && onToggleBreakpoint) {
-          onToggleBreakpoint(lineNumber);
-        }
+        if (lineNumber) callbacksRef.current.onToggleBreakpoint?.(lineNumber);
       }
     });
 
-    // Enable glyph margin
     editor.updateOptions({ glyphMargin: true });
 
-    // Register a command for AI Actions triggered by Code Lenses
-    const cmdId = editor.addCommand(0, (ctx, action, lineNum, snippet) => {
-      if (onAiAction) onAiAction(action, lineNum, snippet);
+    // Command used by the AI code lenses
+    const cmdId = editor.addCommand(0, (_ctx, action, lineNum, snippet) => {
+      callbacksRef.current.onAiAction?.(action, lineNum, snippet);
     });
 
-    // Cleanup previous provider if any
-    if (codeLensProviderRef.current) {
-      codeLensProviderRef.current.dispose();
-    }
-
-    // Register simple regex-based Code Lens provider for AI
-    codeLensProviderRef.current = monaco.languages.registerCodeLensProvider('*', {
-      provideCodeLenses: function (model) {
-        const text = model.getValue();
-        const lines = text.split('\\n');
-        const lenses = [];
-
-        lines.forEach((line, i) => {
-          const match = line.match(/^(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+(\\w+)|^(?:(?:export\\s+)?const|let|var)\\s+(\\w+)\\s*=\\s*(?:async\\s+)?(?:function|\\(.*\\)\\s*=>)/);
-          if (match) {
-            const name = match[1] || match[2] || 'function';
-            const range = new monaco.Range(i + 1, 1, i + 1, 1);
-            lenses.push({
-              range,
-              command: { id: cmdId, title: '✨ Explain', arguments: ['explain', i + 1, name] }
-            });
-            lenses.push({
-              range,
-              command: { id: cmdId, title: '🐛 Debug', arguments: ['debug', i + 1, name] }
-            });
-            lenses.push({
-              range,
-              command: { id: cmdId, title: '📝 Docstring', arguments: ['docstring', i + 1, name] }
-            });
+    codeLensProviderRef.current?.dispose();
+    codeLensProviderRef.current = monaco.languages.registerCodeLensProvider(
+      ['javascript', 'typescript', 'python'],
+      {
+        provideCodeLenses(model) {
+          const lenses = [];
+          const lineCount = model.getLineCount();
+          for (let i = 1; i <= lineCount; i++) {
+            const match = model.getLineContent(i).match(LENS_PATTERN);
+            if (!match) continue;
+            const name = match[1] || match[2] || match[3] || match[4] || 'function';
+            const range = new monaco.Range(i, 1, i, 1);
+            lenses.push(
+              { range, command: { id: cmdId, title: '✨ Explain',   arguments: ['explain', i, name] } },
+              { range, command: { id: cmdId, title: '🐛 Debug',     arguments: ['debug', i, name] } },
+              { range, command: { id: cmdId, title: '📝 Docstring', arguments: ['docstring', i, name] } },
+            );
           }
-        });
-        return { lenses, dispose: () => {} };
-      },
-      resolveCodeLens: function (model, codeLens) {
-        return codeLens;
+          return { lenses, dispose: () => {} };
+        },
+        resolveCodeLens: (_model, codeLens) => codeLens,
       }
-    });
+    );
 
     editor.focus();
   }
 
-  // Update debug line + breakpoint decorations
+  // Debug line highlight
   useEffect(() => {
-    if (!monacoRef.current) return;
     const editor = monacoRef.current;
+    if (!editor || !debugDecorationsRef.current) return;
+    debugDecorationsRef.current.set(debugLine ? [{
+      range: { startLineNumber: debugLine, startColumn: 1, endLineNumber: debugLine, endColumn: 1 },
+      options: { isWholeLine: true, className: 'debug-line-highlight', marginClassName: 'debug-line-margin', stickiness: 1 },
+    }] : []);
+    if (debugLine) editor.revealLineInCenterIfOutsideViewport(debugLine);
+  }, [debugLine, path]);
 
-    // Debug line decoration
-    const debugDecorations = debugLine ? [
-      {
-        range: { startLineNumber: debugLine, startColumn: 1, endLineNumber: debugLine, endColumn: 1 },
-        options: {
-          isWholeLine: true,
-          className: 'debug-line-highlight',
-          marginClassName: 'debug-line-margin',
-          stickiness: 1
-        }
-      }
-    ] : [];
-
-    debugDecorationsRef.current = editor.deltaDecorations(debugDecorationsRef.current, debugDecorations);
-
-    if (debugLine) {
-      editor.revealLineInCenterIfOutsideViewport(debugLine);
-    }
-  }, [debugLine]);
-
-  // Breakpoint glyph decorations
+  // Breakpoint glyphs
   useEffect(() => {
-    if (!monacoRef.current) return;
-    const editor = monacoRef.current;
-
-    const bpDecorations = Array.from(breakpoints).map(line => ({
+    if (!breakpointDecorationsRef.current) return;
+    breakpointDecorationsRef.current.set(Array.from(breakpoints || []).map(line => ({
       range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
-      options: {
-        isWholeLine: false,
-        glyphMarginClassName: 'breakpoint-glyph',
-        stickiness: 1,
-      }
-    }));
-
-    breakpointDecorationsRef.current = editor.deltaDecorations(
-      breakpointDecorationsRef.current,
-      bpDecorations
-    );
-  }, [breakpoints]);
+      options: { isWholeLine: false, glyphMarginClassName: 'breakpoint-glyph', stickiness: 1 },
+    })));
+  }, [breakpoints, path]);
 
   function handleEditorWillMount(monaco) {
-    // Define NexIDE dark theme
     monaco.editor.defineTheme('nexide-dark', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment',    foreground: '565870', fontStyle: 'italic' },
-        { token: 'keyword',    foreground: 'a855f7', fontStyle: 'bold' },
-        { token: 'string',     foreground: '6ee7b7' },
-        { token: 'number',     foreground: 'f97316' },
-        { token: 'delimiter',  foreground: '8b8fa8' },
-        { token: 'variable',   foreground: '00d4ff' },
-        { token: 'type',       foreground: 'fbbf24' },
-        { token: 'function',   foreground: '00d4ff' },
-        { token: 'identifier', foreground: 'e2e4ef' },
-      ],
-      colors: {
-        'editor.background':           '#0d0e14',
-        'editor.foreground':           '#e2e4ef',
-        'editorLineNumber.foreground': '#3d3f57',
-        'editorLineNumber.activeForeground': '#8b8fa8',
-        'editor.selectionBackground':  '#7c3aed33',
-        'editor.lineHighlightBackground': '#13141c',
-        'editorCursor.foreground':     '#00d4ff',
-        'editor.findMatchBackground':  '#00d4ff33',
-        'editorWidget.background':     '#13141c',
-        'editorWidget.border':         '#2a2b3d',
-        'input.background':            '#0f1018',
-        'input.border':                '#2a2b3d',
-        'focusBorder':                 '#7c3aed',
-        'scrollbarSlider.background':  '#2a2b3d66',
-        'scrollbarSlider.hoverBackground': '#3d3f5766',
-        'editorGutter.background':     '#0d0e14',
-        'editorIndentGuide.background1': '#2a2b3d',
-        'editorIndentGuide.activeBackground1': '#3d3f57',
-      },
+      base: 'vs-dark', inherit: true, rules: BASE_RULES,
+      colors: themeColors('#0d0e14', '#13141c', '#2a2b3d', '#00d4ff'),
+    });
+    monaco.editor.defineTheme('nexide-aurora', {
+      base: 'vs-dark', inherit: true, rules: BASE_RULES,
+      colors: themeColors('#0a0b12', '#12101e', '#2d2442', '#5eead4'),
+    });
+    monaco.editor.defineTheme('nexide-crimson', {
+      base: 'vs-dark', inherit: true, rules: BASE_RULES,
+      colors: themeColors('#120a0a', '#1c0f0f', '#422424', '#fca5a5'),
     });
   }
 
@@ -324,8 +319,8 @@ body {
         language={language === 'typescript' ? 'typescript' : language}
         value={currentCode}
         path={path ? `file:///${path}` : undefined}
-        theme="nexide-dark"
-        onChange={val => onChange && onChange(val || '')}
+        theme={MONACO_THEMES[theme] || 'nexide-dark'}
+        onChange={val => onChange?.(val ?? '')}
         beforeMount={handleEditorWillMount}
         onMount={handleEditorDidMount}
         options={{
@@ -341,6 +336,7 @@ body {
           cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',
           wordWrap,
+          wordWrapColumn: 80,
           renderWhitespace: 'selection',
           bracketPairColorization: { enabled: true },
           guides: { bracketPairs: true, indentation: true },

@@ -149,18 +149,28 @@ export function useFileSystem() {
     await parentHandle.removeEntry(name, { recursive: true });
   }, []);
 
+  // Preload source files into Monaco models (bounded so huge folders don't exhaust memory)
   const readAllFiles = useCallback(async (tree) => {
     const results = [];
-    const exts = ['.js', '.jsx', '.ts', '.tsx', '.json', '.html', '.css', '.md'];
-    
+    const exts = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.json', '.html', '.css', '.md', '.py'];
+    const MAX_FILES = 300;
+    const MAX_FILE_BYTES = 512 * 1024;
+
+    async function fileSize(handle) {
+      if (handle.fallback) return handle.file?.size ?? 0;
+      return (await handle.getFile()).size;
+    }
+
     async function traverse(nodes) {
       for (const node of nodes) {
+        if (results.length >= MAX_FILES) return;
         if (node.kind === 'directory') {
           await traverse(node.children);
         } else if (node.kind === 'file') {
           const ext = node.name.substring(node.name.lastIndexOf('.'));
           if (exts.includes(ext.toLowerCase())) {
             try {
+              if (await fileSize(node.handle) > MAX_FILE_BYTES) continue;
               const content = await readFile(node.handle);
               results.push({ path: node.path, name: node.name, content });
             } catch (e) {
@@ -176,9 +186,13 @@ export function useFileSystem() {
   }, [readFile]);
 
   const refreshTree = useCallback(async () => {
-    if (!rootHandle) return;
-    const tree = await buildFileTree(rootHandle);
-    setFileTree(tree);
+    // The <input webkitdirectory> fallback is a one-time snapshot; nothing to re-read
+    if (!rootHandle || rootHandle.fallback) return;
+    try {
+      setFileTree(await buildFileTree(rootHandle));
+    } catch (e) {
+      setError(e.message);
+    }
   }, [rootHandle]);
 
   const isSupported = true; // Polyfilled for all browsers

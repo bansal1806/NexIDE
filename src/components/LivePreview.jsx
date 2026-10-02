@@ -2,6 +2,9 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { Monitor, RefreshCw, ExternalLink, AlertCircle } from 'lucide-react';
 
 // Build a self-contained srcdoc from code + language
+// Inline <script> content must not contain "</script" or it would end the tag early
+const escapeInlineScript = (code) => code.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
+
 function buildSandbox(code, language, allFiles = {}) {
   const consoleInterceptor = `
 <script>
@@ -47,7 +50,9 @@ function buildSandbox(code, language, allFiles = {}) {
 </head>
 <body>
 <script>
-try { ${code} } catch(e) { console.error(e.message); }
+try {
+${escapeInlineScript(code)}
+} catch(e) { console.error(e.message); }
 </script>
 </body>
 </html>`;
@@ -81,15 +86,20 @@ export function LivePreview({ code, language, onConsoleMessage }) {
 
   const canPreview = PREVIEWABLE.includes(language);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (!iframeRef.current || !canPreview) return;
     setLoading(true);
     setError(null);
     try {
-      const srcdoc = buildSandbox(code, language);
-      iframeRef.current.srcdoc = srcdoc;
+      let source = code;
+      if (language === 'typescript') {
+        const { transpileTS } = await import('../runtime/transpile');
+        source = transpileTS(code);
+      }
+      if (iframeRef.current) iframeRef.current.srcdoc = buildSandbox(source, language);
     } catch (e) {
       setError(e.message);
+      setLoading(false);
     }
   }, [code, language, canPreview]);
 
@@ -103,9 +113,12 @@ export function LivePreview({ code, language, onConsoleMessage }) {
   // Listen for console messages from iframe
   useEffect(() => {
     const handler = (e) => {
-      if (e.data?.__nexide && onConsoleMessage) {
-        onConsoleMessage(e.data.type, e.data.data.join(' '));
-      }
+      // Only accept messages from our own preview frame
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const { __nexide, type, data } = e.data || {};
+      if (!__nexide || !onConsoleMessage || !Array.isArray(data)) return;
+      if (!['log', 'info', 'warn', 'error'].includes(type)) return;
+      onConsoleMessage(type, data.map(String).join(' ').slice(0, 10_000));
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -164,3 +177,5 @@ export function LivePreview({ code, language, onConsoleMessage }) {
     </div>
   );
 }
+
+export default LivePreview;

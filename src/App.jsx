@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { useAuth } from './hooks/useAuth';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
@@ -6,8 +6,7 @@ import { useDebugger } from './hooks/useDebugger';
 import { DebugTimeline } from './components/DebugTimeline';
 import { VariableInspector } from './components/VariableInspector';
 import {
-  FolderOpen, Settings as SettingsIcon, TerminalSquare,
-  Files, Map, MessageSquare, Play, Zap, Bug
+  Settings as SettingsIcon, TerminalSquare, Files, Map as MapIcon, MessageSquare,
 } from 'lucide-react';
 import './App.css';
 
@@ -22,379 +21,471 @@ import { useMonacoWorkspace } from './hooks/useMonacoWorkspace';
 import { fetchFileContent } from './services/github';
 import { loadSettings, saveSettings, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
+import { getLang, findNodeByPath, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
 
 // Components
 import { FileExplorer }   from './components/FileExplorer';
-import { Editor }         from './components/Editor';
+import { Editor, STARTERS } from './components/Editor';
 import { ConsoleOutput }  from './components/ConsoleOutput';
 import { AIChat }         from './components/AIChat';
-import { CodeMap }        from './components/CodeMap';
 import { StatusBar }      from './components/StatusBar';
 import { TopBar }         from './components/TopBar';
-import { LivePreview }    from './components/LivePreview';
 import { Terminal }       from './components/Terminal';
 import { Settings }       from './components/Settings';
 import { GitHubModal }    from './components/GitHubModal';
 import { WelcomeScreen }  from './components/WelcomeScreen';
 import { CommandPalette } from './components/CommandPalette';
-import { AuthModal }       from './components/AuthModal';
+import { AuthModal }      from './components/AuthModal';
 
-// Language detection
-const EXT_LANG = {
-  js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
-  py: 'python', html: 'html', css: 'css', scss: 'css',
-  json: 'json', md: 'markdown', txt: 'plaintext', sh: 'shell',
-  yaml: 'yaml', yml: 'yaml', toml: 'plaintext',
+// Heavy panels (d3, sucrase) load on demand
+const CodeMap     = lazy(() => import('./components/CodeMap'));
+const LivePreview = lazy(() => import('./components/LivePreview'));
+
+const RUNNABLE = new Set(['javascript', 'typescript', 'python']);
+
+const TEMPLATES = {
+  js:   { file: 'main.js',    lang: 'javascript' },
+  py:   { file: 'main.py',    lang: 'python' },
+  html: { file: 'index.html', lang: 'html' },
+  ts:   { file: 'main.ts',    lang: 'typescript' },
 };
-
-function getLang(filename) {
-  if (!filename) return 'plaintext';
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
-  return EXT_LANG[ext] || 'plaintext';
-}
-
-function findHandleByPath(nodes, targetPath) {
-  for (const node of nodes) {
-    if (node.path === targetPath) return node.handle;
-    if (node.children) {
-      const found = findHandleByPath(node.children, targetPath);
-      if (found) return found;
-    }
-  }
-  return null;
-}
+const BINARY_EXT = /\.(png|jpe?g|gif|webp|ico|bmp|pdf|zip|gz|tar|7z|woff2?|ttf|otf|eot|mp[34]|wav|ogg|webm|mov|exe|dll|so|wasm|class|jar)$/i;
 
 let tabIdCounter = 1;
 
 export default function App() {
-  console.log('App Rendering...');
-  
-  const [settings, setSettings] = useState(() => loadSettings());
-  
-  const [workspaceFiles, setWorkspaceFiles] = useState([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  
+  // ── Auth ─────────────────────────────────────────────────────────
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
+  // ── Notices (status bar) ─────────────────────────────────────────
+  const [notice, setNotice] = useState(null);
+  const notify = useCallback((type, text) => setNotice({ type, text, id: Date.now() }), []);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // ── Settings: local always; cloud only after this user's cloud copy was merged ──
+  const [settings, setSettings] = useState(loadSettings);
+  const settingsRef = useRef(settings);
+  const cloudSyncedForRef = useRef(null);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+    saveSettings(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    cloudSyncedForRef.current = null;
+    if (!userId) return;
+    let cancelled = false;
+    syncSettingsWithCloud(userId, settingsRef.current)
+      .then(merged => {
+        if (cancelled) return;
+        cloudSyncedForRef.current = userId;
+        setSettings(merged);
+      })
+      .catch(e => console.error('Settings sync failed:', e));
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || cloudSyncedForRef.current !== userId) return;
+    const t = setTimeout(() => {
+      persistSettingsToCloud(userId, settings).catch(e => console.error('Settings upload failed:', e));
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [settings, userId]);
+
+  // ── Cloud projects ───────────────────────────────────────────────
   const [cloudMode, setCloudMode] = useState(false);
   const [cloudProjects, setCloudProjects] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null);
 
-  // ── Auth ─────────────────────────────────────────────────────────
-  const { user } = useAuth();
-
-  // Persist settings
-  useEffect(() => {
-    saveSettings(settings);
-    if (user) {
-      persistSettingsToCloud(user.id, settings).catch(e => console.error(e));
+  const loadCloudProjects = useCallback(async () => {
+    try {
+      setCloudProjects(await fetchProjects());
+    } catch (e) {
+      console.error('Loading projects failed:', e);
     }
-  }, [settings, user]);
+  }, []);
 
-  // Initial Sync when user logs in
   useEffect(() => {
-    if (user) {
-      syncSettingsWithCloud(user.id, settings, setSettings).catch(e => console.error(e));
-      loadCloudProjects();
-    } else {
-      setCloudProjects([]);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+    if (!userId) return;
+    let cancelled = false;
+    fetchProjects()
+      .then(projects => { if (!cancelled) setCloudProjects(projects); })
+      .catch(e => console.error('Loading projects failed:', e));
+    return () => { cancelled = true; };
+  }, [userId]);
 
-  const loadCloudProjects = async () => {
-    const projects = await fetchProjects();
-    setCloudProjects(projects);
-  };
+  const visibleCloudProjects = userId ? cloudProjects : [];
 
-  const { 
+  // ── Debugger ─────────────────────────────────────────────────────
+  const {
     snapshots, currentIndex, currentSnapshot, previousSnapshot,
     isDebugging, isPlaying, playSpeed, changedVars, stats,
     breakpoints, watchList,
-    startDebug, endDebug, addSnapshot, setPlayhead, 
+    startDebug, endDebug, addSnapshots, focusFirstBreakpoint, setPlayhead,
     stepForward, stepBackward, jumpToStart, jumpToEnd, clearSnapshots,
-    toggleBreakpoint, togglePlay, setPlaySpeed,
-    addWatch, removeWatch,
+    toggleBreakpoint, jumpToNextBreakpoint, jumpToPrevBreakpoint,
+    togglePlay, setPlaySpeed, addWatch, removeWatch,
   } = useDebugger();
 
-  // ── File System ──────────────────────────────────────────────────────
+  // ── File system / workspaces ─────────────────────────────────────
   const fs = useFileSystem();
+  const [workspaceFiles, setWorkspaceFiles] = useState([]);
+  const [githubMode, setGithubMode] = useState(false);
+  const [githubInfo, setGithubInfo] = useState(null);
+  const [githubTree, setGithubTree] = useState([]); // also holds the cloud project tree
 
-  // ── Tabs (open files) ──────────────────────────────────────────────
-  const [tabs, setTabs]           = useState([]);
+  const fileTree = (cloudMode || githubMode) ? githubTree : fs.fileTree;
+
+  // ── Tabs ─────────────────────────────────────────────────────────
+  const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
-  
-  const activeTab = useMemo(() => {
-    return tabs.find(t => t.id === activeTabId) || tabs[0] || null;
-  }, [tabs, activeTabId]);
+  const tabsRef = useRef(tabs);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
 
-  // ── GitHub mode ───────────────────────────────────────────────────
-  const [githubMode, setGithubMode]   = useState(false);
-  const [githubInfo, setGithubInfo]   = useState(null);
-  const [githubTree, setGithubTree]   = useState([]);
+  const activeTab = useMemo(
+    () => tabs.find(t => t.id === activeTabId) || tabs[0] || null,
+    [tabs, activeTabId]
+  );
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
-  // ── UI panels / modals ────────────────────────────────────────────
-  const [bottomPanel, setBottomPanel]   = useState(null); // 'terminal' | 'console' | null
-  const [rightPanel, setRightPanel]     = useState(null); // 'preview' | 'ai' | 'map' | 'debug' | null
-  const [sidebarOpen, setSidebarOpen]   = useState(true);
-  const [githubOpen, setGithubOpen]     = useState(false);
-  const [paletteOpen, setPaletteOpen]   = useState(false);
-  const [authOpen, setAuthOpen]         = useState(false);
+  // ── UI panels / modals ───────────────────────────────────────────
+  const [bottomPanel, setBottomPanel] = useState(null); // 'terminal' | 'console' | null
+  const [rightPanel, setRightPanel]   = useState(null); // 'preview' | 'ai' | 'map' | 'debug' | null
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [githubOpen, setGithubOpen]   = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [authOpen, setAuthOpen]       = useState(false);
 
-  // ── Code execution ────────────────────────────────────────────────
-  const jsRunner  = useCodeRunner();
-  const pyRunner  = usePython();
+  // ── Code execution ───────────────────────────────────────────────
+  const { output: jsOutput, status: jsStatus, runCode: runJs, stop: stopJs, clearOutput: clearJs, addConsoleMessage } = useCodeRunner();
+  const { output: pyOutput, status: pyStatus, runPython, stopPython, clearOutput: clearPy } = usePython();
 
-  const consoleOutput = useMemo(() => {
-    return (activeTab?.lang === 'python' ? pyRunner.output : jsRunner.output) || [];
-  }, [activeTab?.lang, pyRunner.output, jsRunner.output]);
+  const isPythonTab = activeTab?.lang === 'python';
+  const consoleOutput = isPythonTab ? pyOutput : jsOutput;
+  const runStatus = (isPythonTab ? pyStatus : jsStatus) || 'idle';
+  const isRunning = jsStatus === 'running' || pyStatus === 'running';
 
-  const runStatus = useMemo(() => {
-    return (activeTab?.lang === 'python' ? pyRunner.status : jsRunner.status) || 'idle';
-  }, [activeTab?.lang, pyRunner.status, jsRunner.status]);
-
-  const isRunning = runStatus === 'running';
-
-  // ── Auth was moved up ─────────────────────────────────────────────
-
-  // ── AI (Gemini) ───────────────────────────────────────────────────
-  const gemini = useGemini();
+  // ── AI ───────────────────────────────────────────────────────────
+  const gemini = useGemini({ apiKey: settings.geminiApiKey });
+  const { sendMessage: sendAiMessage } = gemini;
 
   const handleAiAction = useCallback((action, lineNum, snippet) => {
     setRightPanel('ai');
-    const prompt = action === 'explain' 
+    const prompt = action === 'explain'
       ? `Explain the "${snippet}" structure near line ${lineNum}.`
       : action === 'debug'
       ? `Look for bugs or improvements in "${snippet}" near line ${lineNum}.`
       : `Write a clean docstring for "${snippet}" near line ${lineNum}.`;
-    
-    gemini.sendMessage(prompt, activeTab?.content || '', activeTab?.lang || 'plaintext', settings.geminiApiKey);
-  }, [gemini, activeTab, settings.geminiApiKey]);
+    const tab = activeTabRef.current;
+    sendAiMessage(prompt, tab?.content || '', tab?.lang || 'plaintext');
+  }, [sendAiMessage]);
 
-  // ── Cursor / status bar ───────────────────────────────────────────
+  // ── Cursor / editor ──────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-
   const editorRef = useRef(null);
 
-  // ── Open a file into a tab ────────────────────────────────────────
-  const openFileInTab = useCallback(async (node) => {
-    const existing = tabs.find(t => t.path === node.path);
-    if (existing) { setActiveTabId(existing.id); return; }
+  const confirmDiscard = useCallback((action) => (
+    !tabsRef.current.some(t => t.dirty) ||
+    window.confirm(`You have unsaved changes. ${action} and discard them?`)
+  ), []);
 
-    let content = '';
+  const resetWorkspace = useCallback(() => {
+    setTabs([]);
+    setActiveTabId(null);
+    clearSnapshots();
+    endDebug();
+  }, [clearSnapshots, endDebug]);
 
-    if (node.handle) {
-      try { content = await fs.readFile(node.handle); }
-      catch (e) { content = "// Error reading file: " + (e.message || ""); }
-    } else if (node._content) {
-      content = node._content;
-    } else if (githubMode && githubInfo) {
-      try {
-        content = await fetchFileContent(
-          githubInfo.owner, githubInfo.repo, node.path,
-          githubInfo.branch, settings.githubToken
-        );
-        node._content = content; 
-      } catch (e) { content = "// GitHub load failed: " + (e.message || ""); }
+  // ── Open a file into a tab ───────────────────────────────────────
+  const openFileInTab = useCallback(async (input) => {
+    if (!input?.path) return null;
+    const existing = tabsRef.current.find(t => t.path === input.path);
+    if (existing) { setActiveTabId(existing.id); return existing; }
+
+    // Callers like the code map / terminal pass bare { path }; resolve the real tree node
+    const node = (input.handle || typeof input._content === 'string')
+      ? input
+      : (findNodeByPath(fileTree, input.path) || input);
+    if (node.kind === 'directory') return null;
+
+    const name = node.name || node.path.split('/').pop();
+    if (BINARY_EXT.test(name)) {
+      notify('info', `${name} looks like a binary file and can't be opened in the editor.`);
+      return null;
     }
 
-    const lang = getLang(node.name);
-    const id   = tabIdCounter++;
-    const tab  = { id, name: node.name, path: node.path, lang, content, handle: node.handle || null, dirty: false };
+    let content = '';
+    try {
+      if (node.handle) {
+        content = await fs.readFile(node.handle);
+      } else if (typeof node._content === 'string') {
+        content = node._content;
+      } else if (githubMode && githubInfo) {
+        content = await fetchFileContent(githubInfo.owner, githubInfo.repo, node.path, githubInfo.branch, settings.githubToken);
+        node._content = content; // cache on the tree node
+      }
+    } catch (e) {
+      notify('error', `Could not open ${node.path}: ${e.message}`);
+      return null;
+    }
+
+    // It may have been opened while we were loading
+    const dup = tabsRef.current.find(t => t.path === node.path);
+    if (dup) { setActiveTabId(dup.id); return dup; }
+
+    const tab = { id: tabIdCounter++, name, path: node.path, lang: getLang(name), content, handle: node.handle || null, dirty: false };
     setTabs(prev => [...prev, tab]);
-    setActiveTabId(id);
+    setActiveTabId(tab.id);
     return tab;
-  }, [tabs, fs, githubMode, githubInfo, settings.githubToken]);
+  }, [fileTree, fs, githubMode, githubInfo, settings.githubToken, notify]);
 
   const handleMapNodeClick = useCallback(async (node) => {
     if (node.type === 'folder') return;
     if (node.path) await openFileInTab(node);
-
-    if (node.line && editorRef.current) {
+    if (node.line) {
       setTimeout(() => {
-        editorRef.current.revealLineInCenter(node.line);
-        editorRef.current.setPosition({ lineNumber: node.line, column: 1 });
-        editorRef.current.focus();
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.revealLineInCenter(node.line);
+        editor.setPosition({ lineNumber: node.line, column: 1 });
+        editor.focus();
       }, 100);
     }
   }, [openFileInTab]);
 
   const newFileFromTemplate = useCallback((templateId) => {
-    const content = templateId === 'py' ? 'print("Hello Python")' : 'console.log("Hello JS")';
-    const name = templateId === 'py' ? 'main.py' : 'main.js';
-    const id = tabIdCounter++;
-    const tab = { id, name, path: name, lang: getLang(name), content, handle: null, dirty: false };
+    const template = TEMPLATES[templateId] || TEMPLATES.js;
+    const [base, ext] = template.file.split('.');
+    const content = STARTERS[template.lang] || '';
+    let name = template.file;
+    for (let n = 2; tabsRef.current.some(t => t.path === name); n++) name = `${base}-${n}.${ext}`;
+    const tab = { id: tabIdCounter++, name, path: name, lang: getLang(name), content, handle: null, dirty: false };
     setTabs(prev => [...prev, tab]);
-    setActiveTabId(id);
+    setActiveTabId(tab.id);
   }, []);
 
   const handleEditorChange = useCallback((value) => {
+    const id = activeTabRef.current?.id;
+    if (id == null) return;
     setTabs(prev => prev.map(t =>
-      t.id === activeTabId ? { ...t, content: value ?? '', dirty: true } : t
+      t.id === id && t.content !== value ? { ...t, content: value, dirty: true } : t
     ));
-  }, [activeTabId]);
+  }, []);
 
-  const saveFile = useCallback(async () => {
-    if (!activeTab) return;
+  // ── Saving ───────────────────────────────────────────────────────
+  const refreshCloudTree = useCallback(async (projectId) => {
+    const files = await fetchProjectFiles(projectId);
+    setGithubTree(buildTreeFromPaths(files));
+    setWorkspaceFiles(files);
+  }, []);
+
+  const saveTab = useCallback(async (tab, { silent = false } = {}) => {
+    if (!tab) return false;
     try {
       if (cloudMode && activeProjectId) {
-        await saveFileToCloud(activeProjectId, activeTab.path, activeTab.name, activeTab.content, activeTab.lang);
-      } else if (activeTab.handle) {
-        await fs.writeFile(activeTab.handle, activeTab.content);
+        const isNew = !findNodeByPath(githubTree, tab.path);
+        await saveFileToCloud(activeProjectId, tab.path, tab.name, tab.content, tab.lang);
+        if (isNew) await refreshCloudTree(activeProjectId);
+        else findNodeByPath(githubTree, tab.path)._content = tab.content;
+      } else if (githubMode) {
+        if (!silent) notify('info', 'GitHub files are read-only here. Copy your changes or open the repo as a local folder.');
+        return false;
+      } else if (tab.handle?.fallback) {
+        await fs.writeFile(tab.handle, tab.content);
+        if (!silent) notify('info', 'Saved in memory only — this browser cannot write to disk. Use Chrome/Edge to save files.');
+      } else if (tab.handle) {
+        await fs.writeFile(tab.handle, tab.content);
+      } else if ('showSaveFilePicker' in window && !silent) {
+        // Untitled tab: "Save As"
+        const handle = await window.showSaveFilePicker({ suggestedName: tab.name });
+        await fs.writeFile(handle, tab.content);
+        setTabs(prev => prev.map(t => t.id === tab.id ? { ...t, handle, name: handle.name, path: handle.name, lang: getLang(handle.name) } : t));
+      } else {
+        if (!silent) notify('info', 'Open a folder or a cloud project to save files.');
+        return false;
       }
-      setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, dirty: false } : t));
-    } catch (e) { console.error('Save failed:', e); }
-  }, [activeTab, activeTabId, fs, cloudMode, activeProjectId]);
+      // Only clear dirty if nothing changed while saving
+      setTabs(prev => prev.map(t => t.id === tab.id && t.content === tab.content ? { ...t, dirty: false } : t));
+      return true;
+    } catch (e) {
+      if (e?.name === 'AbortError') return false; // user cancelled a picker
+      console.error('Save failed:', e);
+      notify('error', `Save failed: ${e.message || e}`);
+      return false;
+    }
+  }, [cloudMode, activeProjectId, githubMode, githubTree, fs, notify, refreshCloudTree]);
+
+  const saveFile = useCallback(() => saveTab(activeTabRef.current), [saveTab]);
+
+  // Auto Save: 1s after the last edit, for files that have a real backing store
+  useEffect(() => {
+    if (!settings.autoSave || !activeTab?.dirty) return;
+    const backed = (cloudMode && activeProjectId) || (activeTab.handle && !activeTab.handle.fallback);
+    if (!backed) return;
+    const t = setTimeout(() => saveTab(activeTab, { silent: true }), 1000);
+    return () => clearTimeout(t);
+  }, [settings.autoSave, activeTab, cloudMode, activeProjectId, saveTab]);
 
   const closeTab = useCallback((tabId, e) => {
     e?.stopPropagation();
-    setTabs(prev => {
-      const next = prev.filter(t => t.id !== tabId);
-      if (activeTabId === tabId && next.length > 0) {
-        const idx = Math.max(0, prev.findIndex(t => t.id === tabId) - 1);
-        setActiveTabId(next[Math.min(idx, next.length - 1)].id);
-      }
-      return next;
-    });
-  }, [activeTabId]);
-
-  const runCode = useCallback(async () => {
-    if (!activeTab) return;
-    setBottomPanel('console');
-    if (activeTab.lang === 'python') {
-      await pyRunner.runPython(activeTab.content);
-    } else {
-      jsRunner.runCode(activeTab.content, activeTab.lang);
+    const current = tabsRef.current;
+    const tab = current.find(t => t.id === tabId);
+    if (!tab) return;
+    if (tab.dirty && !window.confirm(`Discard unsaved changes to ${tab.name}?`)) return;
+    const idx = current.indexOf(tab);
+    const remaining = current.filter(t => t.id !== tabId);
+    setTabs(prev => prev.filter(t => t.id !== tabId));
+    if (activeTabRef.current?.id === tabId) {
+      setActiveTabId(remaining.length ? remaining[Math.max(0, idx - 1)].id : null);
     }
-  }, [activeTab, jsRunner, pyRunner]);
+  }, []);
+
+  // ── Run / debug ──────────────────────────────────────────────────
+  const runTab = useCallback((tab, options) => {
+    if (!tab) return null;
+    setBottomPanel('console');
+    return tab.lang === 'python'
+      ? runPython(tab.content, options)
+      : runJs(tab.content, tab.lang, options);
+  }, [runPython, runJs]);
+
+  const runCode = useCallback(() => runTab(activeTabRef.current), [runTab]);
+
+  const stopRun = useCallback(() => {
+    stopPython();
+    stopJs();
+  }, [stopPython, stopJs]);
 
   const runDebug = useCallback(async () => {
-    if (!activeTab) return;
-    setBottomPanel('console');
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    if (!RUNNABLE.has(tab.lang)) {
+      notify('info', 'The debugger supports JavaScript, TypeScript and Python.');
+      return;
+    }
     setRightPanel('debug');
     startDebug();
-    
-    const options = {
-      debug: true,
-      onDebugStep: (step) => addSnapshot(step)
-    };
+    await runTab(tab, { debug: true, onDebugSteps: addSnapshots });
+    focusFirstBreakpoint();
+  }, [runTab, startDebug, addSnapshots, focusFirstBreakpoint, notify]);
 
-    if (activeTab.lang === 'python') {
-      await pyRunner.runPython(activeTab.content, options);
-    } else {
-      jsRunner.runCode(activeTab.content, activeTab.lang, options);
-    }
-  }, [activeTab, jsRunner, pyRunner, startDebug, addSnapshot]);
+  const exitDebug = useCallback(() => {
+    clearSnapshots();
+    endDebug();
+    setRightPanel(null);
+  }, [clearSnapshots, endDebug]);
 
+  // ── Workspace switching ──────────────────────────────────────────
   const handleOpenFolder = useCallback(async () => {
-    const hasDirty = tabs.some(t => t.dirty);
-    if (hasDirty) {
-      const confirmed = window.confirm("You have unsaved changes. Are you sure you want to open a new folder and discard them?");
-      if (!confirmed) return;
-    }
-
+    if (!confirmDiscard('Open a new folder')) return;
     const result = await fs.openFolder();
-    if (result) {
-      setGithubMode(false);
-      setCloudMode(false);
-      setActiveProjectId(null);
-      setGithubInfo(null);
-      setGithubTree([]);
-      setTabs([]);
-      setActiveTabId(null);
-      clearSnapshots();
-      endDebug();
-      
-      // Eagerly sync real local flies
-      const allFiles = await fs.readAllFiles(result.tree);
-      setWorkspaceFiles(allFiles);
-    }
-  }, [fs, tabs, clearSnapshots, endDebug]);
+    if (!result) return;
+    setGithubMode(false);
+    setCloudMode(false);
+    setActiveProjectId(null);
+    setGithubInfo(null);
+    setGithubTree([]);
+    resetWorkspace();
+    setWorkspaceFiles(await fs.readAllFiles(result.tree));
+  }, [fs, confirmDiscard, resetWorkspace]);
 
   const handleGitHubLoad = useCallback((info) => {
-    const hasDirty = tabs.some(t => t.dirty);
-    if (hasDirty) {
-      const confirmed = window.confirm("You have unsaved changes. Are you sure you want to open a new repository and discard them?");
-      if (!confirmed) return;
-    }
-
+    if (!confirmDiscard('Open a new repository')) return;
     setGithubMode(true);
     setCloudMode(false);
     setActiveProjectId(null);
-    setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch, token: settings.githubToken });
+    setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch });
     setGithubTree(info.tree);
-    setTabs([]);
-    setActiveTabId(null);
-    clearSnapshots();
-    endDebug();
+    setWorkspaceFiles([]);
+    resetWorkspace();
     setSidebarOpen(true);
-  }, [settings.githubToken, tabs, clearSnapshots, endDebug]);
-
-  const handleBackgroundModelChange = useCallback((path, content) => {
-    setTabs(prev => {
-      // Find if we already have it open
-      const existingIdx = prev.findIndex(t => t.path === path);
-      if (existingIdx !== -1) {
-        const next = [...prev];
-        // Only update if it actually changed, to avoid endless loops
-        if (next[existingIdx].content !== content) {
-          next[existingIdx] = { ...next[existingIdx], content, dirty: true };
-          return next;
-        }
-        return prev;
-      }
-      
-      // If it's not open, open it as a new dirty tab so the user sees the bulk edit
-      // We need to look up its filename from path
-      const name = path.split('/').pop();
-      const newTab = {
-        id: tabIdCounter++,
-        name,
-        path,
-        lang: getLang(name),
-        content,
-        handle: fs.fileTree ? findHandleByPath(fs.fileTree, path) : null,
-        dirty: true
-      };
-      return [...prev, newTab];
-    });
-  }, [fs.fileTree]);
+    if (info.truncated) notify('info', 'Large repository: GitHub returned a partial file tree.');
+  }, [confirmDiscard, resetWorkspace, notify]);
 
   const handleOpenCloudProject = useCallback(async (project) => {
+    const sameProject = cloudMode && project.id === activeProjectId;
+    if (!sameProject && !confirmDiscard('Open this project')) return;
     setGithubMode(false);
     setCloudMode(true);
     setActiveProjectId(project.id);
     setGithubInfo(null);
     setGithubTree([]);
-    setTabs([]);
-    setActiveTabId(null);
-    clearSnapshots();
-    endDebug();
-
-    const files = await fetchProjectFiles(project.id);
-    
-    // Convert flat files array to a tree structure (assuming root level for simplicity here)
-    const tree = files.map(f => ({
-      name: f.name,
-      path: f.path,
-      kind: 'file',
-      _content: f.content
-    }));
-    
-    setWorkspaceFiles(files); // Might need a specialized cloud hook later
-    // Set tree somewhere so FileExplorer can read it
-    setGithubTree(tree); // Reuse github tree state for cloud tree for now to save state vars
+    resetWorkspace();
+    try {
+      await refreshCloudTree(project.id);
+    } catch (e) {
+      notify('error', `Could not load project: ${e.message}`);
+    }
     setSidebarOpen(true);
-  }, [clearSnapshots, endDebug]);
+  }, [cloudMode, activeProjectId, confirmDiscard, resetWorkspace, refreshCloudTree, notify]);
 
   const handleCreateCloudProject = useCallback(async () => {
-    if (!user) return setAuthOpen(true);
-    const name = window.prompt("Project Name:");
+    if (!userId) { setAuthOpen(true); return; }
+    const name = window.prompt('Project name:')?.trim();
     if (!name) return;
-    const p = await createProject(user.id, name);
-    await loadCloudProjects();
-    handleOpenCloudProject(p);
-  }, [user, handleOpenCloudProject]);
+    if (name.length > 100) { notify('error', 'Project name must be 100 characters or fewer.'); return; }
+    try {
+      const project = await createProject(userId, name);
+      await loadCloudProjects();
+      await handleOpenCloudProject(project);
+    } catch (e) {
+      notify('error', `Could not create project: ${e.message}`);
+    }
+  }, [userId, loadCloudProjects, handleOpenCloudProject, notify]);
 
-  // Custom hook that binds raw code models into Monaco's unified workspace
+  const handleNewCloudFile = useCallback(async () => {
+    if (!activeProjectId) return;
+    const raw = window.prompt('New file path (e.g. src/index.js):');
+    if (raw == null) return;
+    const path = normalizeRelativePath(raw);
+    if (!path) { notify('error', 'Invalid file path.'); return; }
+    if (findNodeByPath(githubTree, path)) { openFileInTab({ path }); return; }
+    const name = path.split('/').pop();
+    try {
+      await saveFileToCloud(activeProjectId, path, name, '', getLang(name));
+      await refreshCloudTree(activeProjectId);
+      await openFileInTab({ path, name, kind: 'file', _content: '' });
+    } catch (e) {
+      notify('error', `Could not create file: ${e.message}`);
+    }
+  }, [activeProjectId, githubTree, openFileInTab, refreshCloudTree, notify]);
+
+  const handleRefreshTree = useCallback(() => {
+    if (cloudMode && activeProjectId) {
+      refreshCloudTree(activeProjectId).catch(e => notify('error', e.message));
+    } else {
+      fs.refreshTree();
+    }
+  }, [cloudMode, activeProjectId, refreshCloudTree, fs, notify]);
+
+  // Edits made to background Monaco models (e.g. multi-file rename)
+  const handleBackgroundModelChange = useCallback((path, content) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.path === path);
+      if (idx !== -1) {
+        if (prev[idx].content === content) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], content, dirty: true };
+        return next;
+      }
+      const name = path.split('/').pop();
+      return [...prev, {
+        id: tabIdCounter++, name, path, lang: getLang(name), content,
+        handle: findNodeByPath(fs.fileTree, path)?.handle ?? null,
+        dirty: true,
+      }];
+    });
+  }, [fs.fileTree]);
+
   useMonacoWorkspace(workspaceFiles, handleBackgroundModelChange);
 
   const handleCommand = useCallback((cmd) => {
@@ -407,51 +498,76 @@ export default function App() {
     }
   }, [handleOpenFolder, runCode]);
 
+  const handleTerminalRun = useCallback(async (path) => {
+    const tab = await openFileInTab({ path, name: path.split('/').pop() });
+    if (!tab) return;
+    if (!RUNNABLE.has(tab.lang)) { notify('info', `Cannot run ${tab.name}: unsupported language.`); return; }
+    runTab(tab);
+  }, [openFileInTab, runTab, notify]);
+
+  // ── Global keyboard shortcuts ────────────────────────────────────
+  const anyModalOpen = settingsOpen || paletteOpen || githubOpen || authOpen;
   useEffect(() => {
     const handler = (e) => {
-      // F5 = Debug, F10 = Step Over (forward), F9 = Toggle Breakpoint, Esc = End Debug
-      if (e.key === 'F5') { e.preventDefault(); runDebug(); return; }
-      if (e.key === 'F10' && isDebugging) { e.preventDefault(); stepForward(); return; }
-      if (e.key === 'Escape' && isDebugging) { clearSnapshots(); endDebug(); setRightPanel(null); return; }
+      if (e.key === 'F5') { e.preventDefault(); if (activeTabRef.current) runDebug(); return; }
+      if (isDebugging) {
+        if (e.key === 'F10') { e.preventDefault(); stepForward(); return; }
+        if (e.key === 'F8')  { e.preventDefault(); (e.shiftKey ? jumpToPrevBreakpoint : jumpToNextBreakpoint)(); return; }
+        if (e.key === 'Escape' && !anyModalOpen) { exitDebug(); return; }
+      }
 
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      if (e.key === 'p' || e.key === 'P') { e.preventDefault(); setPaletteOpen(v => !v); }
-      if (e.key === 's') { e.preventDefault(); saveFile(); }
-      if (e.key === 'Enter') { e.preventDefault(); runCode(); }
-      if (e.key === 'b') { e.preventDefault(); setSidebarOpen(v => !v); }
-      if (e.key === '\\') { e.preventDefault(); setRightPanel(p => p === 'ai' ? null : 'ai'); }
-      if (e.key === '`') { e.preventDefault(); setBottomPanel(v => v === 'terminal' ? null : 'terminal'); }
-      if (e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'p')     { e.preventDefault(); setPaletteOpen(v => !v); }
+      if (key === 's')     { e.preventDefault(); saveFile(); }
+      if (key === 'enter') { e.preventDefault(); runCode(); }
+      if (key === 'b')     { e.preventDefault(); setSidebarOpen(v => !v); }
+      if (key === '\\')    { e.preventDefault(); setRightPanel(p => p === 'ai' ? null : 'ai'); }
+      if (key === '`')     { e.preventDefault(); setBottomPanel(v => v === 'terminal' ? null : 'terminal'); }
+      if (key === ',')     { e.preventDefault(); setSettingsOpen(true); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [saveFile, runCode, runDebug, isDebugging, stepForward, clearSnapshots, endDebug]);
+  }, [saveFile, runCode, runDebug, isDebugging, stepForward, jumpToNextBreakpoint, jumpToPrevBreakpoint, exitDebug, anyModalOpen]);
 
-  const fileTree = cloudMode ? githubTree : (githubMode ? githubTree : fs.fileTree);
-  const activeProjectName = cloudProjects.find(p => p.id === activeProjectId)?.name;
-  const rootName = cloudMode ? activeProjectName : (githubMode ? (githubInfo ? `${githubInfo.owner}/${githubInfo.repo}` : 'GitHub') : fs.rootName);
-  const hasFiles = fileTree.length > 0 || tabs.length > 0;
-  const showWelcome = !hasFiles;
+  // ── Derived view state ───────────────────────────────────────────
+  const activeProjectName = visibleCloudProjects.find(p => p.id === activeProjectId)?.name;
+  const rootName = cloudMode
+    ? activeProjectName
+    : (githubMode ? (githubInfo ? `${githubInfo.owner}/${githubInfo.repo}` : 'GitHub') : fs.rootName);
+  const showWelcome = fileTree.length === 0 && tabs.length === 0 && !cloudMode;
+  const statusNotice = notice || (fs.error ? { type: 'error', text: fs.error } : null);
 
-  const handlePreviewConsole = useCallback((type, text) => {
-    jsRunner.addConsoleMessage?.(type, text);
-  }, [jsRunner]);
+  const clearConsole = isPythonTab ? clearPy : clearJs;
+
+  // Inspector shows the innermost frame first, at the line currently executing
+  const inspectorStack = useMemo(() => {
+    if (!currentSnapshot) return [];
+    const frames = [...(currentSnapshot.callStack || [])].reverse();
+    if (!frames.some(f => f.name === '(module)')) frames.push({ name: '(program)' });
+    frames[0] = { ...frames[0], line: currentSnapshot.line };
+    return frames;
+  }, [currentSnapshot]);
+  const panelFallback = <div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
     <div className="app" id="nexide-app" data-theme={settings.theme || 'nexide-dark'}>
-      
+
       <TopBar
         language={activeTab?.lang || 'plaintext'}
         onLanguageChange={(lang) => {
-          setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lang } : t));
+          const id = activeTabRef.current?.id;
+          setTabs(prev => prev.map(t => t.id === id ? { ...t, lang } : t));
         }}
         onRun={runCode}
+        onStop={stopRun}
         onDebug={runDebug}
         onSave={saveFile}
         isRunning={isRunning}
         activePanel={rightPanel}
-        onPanelChange={setRightPanel}
+        onPanelChange={(p) => p === 'console'
+          ? setBottomPanel(v => v === 'console' ? null : 'console')
+          : setRightPanel(cur => cur === p ? null : p)}
         onOpenFolder={handleOpenFolder}
         onOpenGitHub={() => setGithubOpen(true)}
         onSettings={() => setSettingsOpen(true)}
@@ -464,20 +580,20 @@ export default function App() {
 
       <div className="app-body" id="app-body">
         <div className="activity-bar" id="activity-bar">
-          <button className={`activity-btn ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(v => !v)} title="Explorer">
+          <button className={`activity-btn ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(v => !v)} title="Explorer" aria-label="Explorer">
             <Files size={18} />
           </button>
-          <button className={`activity-btn ${rightPanel === 'map' ? 'active' : ''}`} onClick={() => setRightPanel(p => p === 'map' ? null : 'map')} title="Code Map">
-            <Map size={18} />
+          <button className={`activity-btn ${rightPanel === 'map' ? 'active' : ''}`} onClick={() => setRightPanel(p => p === 'map' ? null : 'map')} title="Code Map" aria-label="Code map">
+            <MapIcon size={18} />
           </button>
-          <button className={`activity-btn ${rightPanel === 'ai' ? 'active' : ''}`} onClick={() => setRightPanel(p => p === 'ai' ? null : 'ai')} title="AI Assistant">
+          <button className={`activity-btn ${rightPanel === 'ai' ? 'active' : ''}`} onClick={() => setRightPanel(p => p === 'ai' ? null : 'ai')} title="AI Assistant" aria-label="AI assistant">
             <MessageSquare size={18} />
           </button>
           <div className="activity-spacer" />
-          <button className={`activity-btn ${bottomPanel === 'terminal' ? 'active' : ''}`} onClick={() => setBottomPanel(v => v === 'terminal' ? null : 'terminal')} title="Terminal">
+          <button className={`activity-btn ${bottomPanel === 'terminal' ? 'active' : ''}`} onClick={() => setBottomPanel(v => v === 'terminal' ? null : 'terminal')} title="Terminal" aria-label="Terminal">
             <TerminalSquare size={18} />
           </button>
-          <button className="activity-btn activity-settings-btn" onClick={() => setSettingsOpen(true)} title="Settings">
+          <button className="activity-btn activity-settings-btn" onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings">
             <SettingsIcon size={18} />
           </button>
         </div>
@@ -499,13 +615,14 @@ export default function App() {
                 onOpenFolder={handleOpenFolder}
                 onFileClick={openFileInTab}
                 activeFilePath={activeTab?.path}
-                onRefresh={cloudMode ? () => handleOpenCloudProject({id: activeProjectId}) : fs.refreshTree}
+                onRefresh={handleRefreshTree}
                 githubMode={githubMode}
                 githubInfo={githubInfo}
                 cloudMode={cloudMode}
-                cloudProjects={cloudProjects}
+                cloudProjects={visibleCloudProjects}
                 onOpenCloudProject={handleOpenCloudProject}
                 onCreateCloudProject={handleCreateCloudProject}
+                onNewCloudFile={handleNewCloudFile}
                 user={user}
               />
             </motion.div>
@@ -525,10 +642,17 @@ export default function App() {
               {tabs.length > 0 && (
                 <div className="tab-bar" role="tablist">
                   {tabs.map(tab => (
-                    <div key={tab.id} className={`tab ${tab.id === activeTabId ? 'active' : ''}`} onClick={() => setActiveTabId(tab.id)} role="tab">
+                    <div
+                      key={tab.id}
+                      className={`tab ${tab.id === activeTab?.id ? 'active' : ''}`}
+                      onClick={() => setActiveTabId(tab.id)}
+                      role="tab"
+                      aria-selected={tab.id === activeTab?.id}
+                      title={tab.path}
+                    >
                       <span className="tab-name">{tab.name}</span>
-                      {tab.dirty && <span className="tab-unsaved" />}
-                      <button className="tab-close" onClick={(e) => closeTab(tab.id, e)}>×</button>
+                      {tab.dirty && <span className="tab-unsaved" aria-label="unsaved" />}
+                      <button className="tab-close" onClick={(e) => closeTab(tab.id, e)} aria-label={`Close ${tab.name}`}>×</button>
                     </div>
                   ))}
                 </div>
@@ -548,6 +672,7 @@ export default function App() {
                     debugLine={isDebugging && currentSnapshot ? currentSnapshot.line : null}
                     breakpoints={breakpoints}
                     onToggleBreakpoint={toggleBreakpoint}
+                    theme={settings.theme}
                     fontSize={settings.fontSize}
                     tabSize={settings.tabSize}
                     wordWrap={settings.wordWrap}
@@ -568,11 +693,19 @@ export default function App() {
                   </button>
                 ))}
                 <div style={{ flex: 1 }} />
-                <button className="panel-close-btn" onClick={() => setBottomPanel(null)}>×</button>
+                <button className="panel-close-btn" onClick={() => setBottomPanel(null)} aria-label="Close panel">×</button>
               </div>
               <div className="panel-content">
-                {bottomPanel === 'terminal' && <Terminal open={true} fileTree={fileTree} onRunFile={(path) => { const node = { path, name: path.split('/').pop() }; openFileInTab(node); runCode(); }} />}
-                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearSnapshots} />}
+                {bottomPanel === 'terminal' && (
+                  <Terminal
+                    open={true}
+                    fileTree={fileTree}
+                    activeFilePath={activeTab?.path}
+                    onRunFile={handleTerminalRun}
+                    onClose={() => setBottomPanel(null)}
+                  />
+                )}
+                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} />}
               </div>
             </div>
           )}
@@ -587,45 +720,54 @@ export default function App() {
                 </button>
               ))}
               <div style={{ flex: 1 }} />
-              <button className="panel-close-btn" onClick={() => setRightPanel(null)}>×</button>
+              <button className="panel-close-btn" onClick={() => setRightPanel(null)} aria-label="Close panel">×</button>
             </div>
             <div className="panel-content">
-              <AnimatePresence mode="wait">
-                {rightPanel === 'preview' && (
-                  <motion.div key="preview" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <LivePreview code={activeTab?.content || ''} language={activeTab?.lang || 'plaintext'} onConsoleMessage={handlePreviewConsole} />
-                  </motion.div>
-                )}
-                {rightPanel === 'ai' && (
-                  <motion.div key="ai" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <AIChat gemini={gemini} editorCode={activeTab?.content || ''} language={activeTab?.lang || 'plaintext'} hasApiKey={!!settings.geminiApiKey} onApiKeyNeeded={() => setSettingsOpen(true)} />
-                  </motion.div>
-                )}
-                {rightPanel === 'map' && (
-                  <motion.div key="map" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <CodeMap activeTab={activeTab} tabs={tabs} fileTree={fileTree} onNodeClick={handleMapNodeClick} />
-                  </motion.div>
-                )}
-                {rightPanel === 'debug' && (
-                  <motion.div key="debug" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <VariableInspector
-                      snapshot={currentSnapshot}
-                      previousSnapshot={previousSnapshot}
-                      changedVars={changedVars}
-                      watchList={watchList}
-                      onAddWatch={addWatch}
-                      onRemoveWatch={removeWatch}
-                      callStack={currentSnapshot?.callStack || []}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <Suspense fallback={panelFallback}>
+                <AnimatePresence mode="wait">
+                  {rightPanel === 'preview' && (
+                    <motion.div key="preview" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <LivePreview code={activeTab?.content || ''} language={activeTab?.lang || 'plaintext'} onConsoleMessage={addConsoleMessage} />
+                    </motion.div>
+                  )}
+                  {rightPanel === 'ai' && (
+                    <motion.div key="ai" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <AIChat
+                        gemini={gemini}
+                        editorCode={activeTab?.content || ''}
+                        language={activeTab?.lang || 'plaintext'}
+                        hasApiKey={!!settings.geminiApiKey}
+                        isSignedIn={!!user}
+                        onApiKeyNeeded={() => setSettingsOpen(true)}
+                      />
+                    </motion.div>
+                  )}
+                  {rightPanel === 'map' && (
+                    <motion.div key="map" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <CodeMap activeTab={activeTab} fileTree={fileTree} onNodeClick={handleMapNodeClick} />
+                    </motion.div>
+                  )}
+                  {rightPanel === 'debug' && (
+                    <motion.div key="debug" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <VariableInspector
+                        snapshot={currentSnapshot}
+                        previousSnapshot={previousSnapshot}
+                        changedVars={changedVars}
+                        watchList={watchList}
+                        onAddWatch={addWatch}
+                        onRemoveWatch={removeWatch}
+                        callStack={inspectorStack}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </Suspense>
             </div>
           </div>
         )}
-        
+
         {isDebugging && snapshots.length > 0 && (
-          <DebugTimeline 
+          <DebugTimeline
             snapshots={snapshots}
             currentIndex={currentIndex}
             onSeek={setPlayhead}
@@ -633,19 +775,31 @@ export default function App() {
             onStepForward={stepForward}
             onJumpToStart={jumpToStart}
             onJumpToEnd={jumpToEnd}
-            onReset={() => { clearSnapshots(); endDebug(); setRightPanel(null); }}
+            onReset={exitDebug}
             onTogglePlay={togglePlay}
+            onPrevBreakpoint={jumpToPrevBreakpoint}
+            onNextBreakpoint={jumpToNextBreakpoint}
             isPlaying={isPlaying}
             playSpeed={playSpeed}
             onSpeedChange={setPlaySpeed}
             breakpoints={breakpoints}
             stats={stats}
-            isLive={currentIndex === snapshots.length - 1}
+            isLive={isRunning && currentIndex === snapshots.length - 1}
           />
         )}
       </div>
 
-      <StatusBar language={activeTab?.lang || ''} cursorLine={cursorPos.line} cursorCol={cursorPos.col} status={runStatus} />
+      <StatusBar
+        language={activeTab?.lang || ''}
+        cursorLine={cursorPos.line}
+        cursorCol={cursorPos.col}
+        status={runStatus}
+        fileName={activeTab?.name}
+        isDirty={activeTab?.dirty}
+        githubMode={githubMode}
+        branch={githubInfo?.branch}
+        notice={statusNotice}
+      />
 
       <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSettingsChange={setSettings} isExhausted={gemini.isExhausted} />
       <GitHubModal open={githubOpen} onClose={() => setGithubOpen(false)} onLoad={handleGitHubLoad} githubToken={settings.githubToken} />
