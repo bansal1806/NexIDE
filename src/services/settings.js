@@ -1,7 +1,7 @@
-// Settings persisted to localStorage
-const KEY = 'nexide:settings';
-
+// Settings persisted to localStorage; non-secret settings also sync to Supabase.
 import { fetchCloudSettings, saveCloudSettings } from './db';
+
+const KEY = 'nexide:settings';
 
 const DEFAULTS = {
   geminiApiKey: '',
@@ -15,6 +15,20 @@ const DEFAULTS = {
   fontLigatures:true,
 };
 
+// Credentials stay in this browser only — never uploaded.
+export const SECRET_KEYS = ['geminiApiKey', 'githubToken'];
+
+/** Only known, non-secret keys with the right type are allowed through. */
+export function sanitizeForCloud(settings) {
+  const clean = {};
+  for (const [k, def] of Object.entries(DEFAULTS)) {
+    if (SECRET_KEYS.includes(k)) continue;
+    const v = settings?.[k];
+    if (v !== undefined && typeof v === typeof def) clean[k] = v;
+  }
+  return clean;
+}
+
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -25,24 +39,28 @@ export function loadSettings() {
 }
 
 export function saveSettings(settings) {
-  localStorage.setItem(KEY, JSON.stringify(settings));
-}
-
-export async function syncSettingsWithCloud(userId, localSettings, onSynced) {
-  const cloudSettings = await fetchCloudSettings(userId);
-  if (cloudSettings) {
-    // Cloud overrides local
-    const merged = { ...localSettings, ...cloudSettings };
-    saveSettings(merged);
-    onSynced(merged);
-  } else {
-    // Save local to cloud
-    await saveCloudSettings(userId, localSettings);
+  try {
+    localStorage.setItem(KEY, JSON.stringify(settings));
+  } catch (e) {
+    console.warn('Could not persist settings locally:', e);
   }
 }
 
+/**
+ * Merge cloud settings into local ones (cloud wins for non-secret keys).
+ * If the cloud has nothing yet, seed it from local. Returns the merged settings.
+ */
+export async function syncSettingsWithCloud(userId, localSettings) {
+  const cloudSettings = await fetchCloudSettings(userId);
+  if (cloudSettings) {
+    return { ...localSettings, ...sanitizeForCloud(cloudSettings) };
+  }
+  await saveCloudSettings(userId, sanitizeForCloud(localSettings));
+  return localSettings;
+}
+
 export async function persistSettingsToCloud(userId, settings) {
-  await saveCloudSettings(userId, settings);
+  await saveCloudSettings(userId, sanitizeForCloud(settings));
 }
 
 export { DEFAULTS };
