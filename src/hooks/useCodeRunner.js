@@ -87,7 +87,7 @@ export function useCodeRunner() {
         finish({ ok: false, error: e.message });
       };
 
-      worker.postMessage({ type: 'run', id, code, language, debug });
+      worker.postMessage({ type: 'run', id, code, language, debug, stdin: options.stdin || [] });
     });
   }, [addLine, addLines, finish, killWorker]);
 

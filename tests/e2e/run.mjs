@@ -137,6 +137,17 @@ try {
     check(`Editor: Ctrl+Enter runs latest edit (#${n})`, await waitConsole(new RegExp(`version ${n}`), 5000));
   }
 
+  // ── Program input (stdin) ──
+  const setStdin = async (text) => {
+    if (!(await page.locator('#console-stdin').isVisible().catch(() => false))) await page.click('#btn-toggle-stdin');
+    await page.fill('#console-stdin', text);
+  };
+  await setStdin('Ada\n36\n');
+  await setCode(`const name = prompt('Name? ');\nconst age = Number(prompt('Age? '));\nconsole.log(\`hi \${name}, next year \${age + 1}\`);`);
+  await run();
+  check('stdin: JS prompt() reads Input lines', await waitConsole(/Name\? Ada[\s\S]*Age\? 36[\s\S]*hi Ada, next year 37/));
+  await setStdin('');
+
   // ── Debugger ──
   await setCode(`const a = 1;\nconst b = 2;\nfunction add(x, y) {\n  const s = x + y;\n  return s;\n}\nconsole.log(add(a, b));`);
   await page.click('#btn-debug-code');
@@ -211,6 +222,19 @@ try {
   await setCode(`def square(n):\n    r = n * n\n    return r\n\nnums = [square(i) for i in range(4)]\nprint("nums", nums)`);
   await run();
   check('Python: runs via Pyodide', await waitConsole(/nums \[0, 1, 4, 9\]/, 90000));
+
+  await setStdin('Grace\n');
+  await setCode(`name = input("Who? ")\nprint(f"hello {name}")\ninput("again? ")`);
+  await run();
+  await waitConsole(/EOFError/, 30000);
+  const stdinOut = await consoleText();
+  check('stdin: Python input() echoes like a terminal', /Who\? Grace/.test(stdinOut) && /hello Grace/.test(stdinOut));
+  check('stdin: running out of input explains the Input box', /EOFError[\s\S]*Input box/.test(stdinOut));
+  await setStdin('');
+
+  await setCode(`import numpy as np\nprint("numpy sum", int(np.arange(5).sum()))`);
+  await run();
+  check('Python: imported packages install automatically (numpy)', await waitConsole(/numpy sum 10/, 120000));
 
   await setCode(`import js\nprint("py-lockdown", [hasattr(js, n) for n in ("indexedDB", "caches", "Worker")])`);
   await run();

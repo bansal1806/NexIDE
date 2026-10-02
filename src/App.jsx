@@ -22,6 +22,7 @@ import { fetchFileContent } from './services/github';
 import { loadSettings, saveSettings, pickSecrets, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
 import { getSecretStore } from './services/secretStore';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
+import { stdinLines } from './runtime/output';
 import { getLang, findNodeByPath, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
 
 // Components
@@ -221,6 +222,7 @@ export default function App() {
 
   // ── Cursor / editor ──────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [stdinText, setStdinText] = useState('');
   const editorRef = useRef(null);
 
   // The active tab with the editor's *live* text. React state lags the editor by a render,
@@ -397,13 +399,14 @@ export default function App() {
   }, []);
 
   // ── Run / debug ──────────────────────────────────────────────────
-  const runTab = useCallback((tab, options) => {
+  const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
+    const opts = { ...options, stdin: stdinLines(stdinText) };
     return tab.lang === 'python'
-      ? runPython(tab.content, options)
-      : runJs(tab.content, tab.lang, options);
-  }, [runPython, runJs]);
+      ? runPython(tab.content, opts)
+      : runJs(tab.content, tab.lang, opts);
+  }, [runPython, runJs, stdinText]);
 
   const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 
@@ -754,7 +757,7 @@ export default function App() {
                     onClose={() => setBottomPanel(null)}
                   />
                 )}
-                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} />}
+                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} stdin={stdinText} onStdinChange={setStdinText} />}
               </div>
             </div>
           )}

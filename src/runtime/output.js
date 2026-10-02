@@ -19,3 +19,8 @@ export function appendLines(prev, lines) {
   const trimmed = next.slice(next.length - MAX_OUTPUT_LINES + 1);
   return [makeLine('system', `… older output trimmed (keeping last ${MAX_OUTPUT_LINES} lines)`), ...trimmed];
 }
+
+/** Split the stdin box into input lines (a single trailing newline doesn't add an empty line). */
+export function stdinLines(text) {
+  return text ? text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n') : [];
+}

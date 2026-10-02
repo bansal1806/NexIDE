@@ -151,7 +151,10 @@ async def _nx_run(source, ns, debug):
         # Skip Pyodide's internal frames: start at the first frame of the user's code
         while tb is not None and tb.tb_frame.f_code.co_filename != '<exec>':
             tb = tb.tb_next
-        return [False, ''.join(traceback.format_exception(type(e), e, tb)).rstrip()]
+        text = ''.join(traceback.format_exception(type(e), e, tb)).rstrip()
+        if isinstance(e, EOFError):
+            text += "\\n(Hint: put program input in the Console's Input box — one line per input() call.)"
+        return [False, text]
     finally:
         _nx_stop()
 `;
@@ -179,6 +182,7 @@ const pyodideReady = (async () => {
   // A distinct filename keeps the debugger's tracer away from these helpers
   pyodide.runPython(BOOTSTRAP, { filename: '<nexide>' });
   return {
+    pyodide,
     newDict: pyodide.globals.get('dict'),
     nxRun: pyodide.globals.get('_nx_run'),
   };
@@ -190,7 +194,7 @@ pyodideReady.then(
 );
 
 self.onmessage = async (event) => {
-  const { type, id, code, debug = false } = event.data || {};
+  const { type, id, code, debug = false, stdin = [] } = event.data || {};
   if (type !== 'run') return;
   currentRunId = id;
 
@@ -201,6 +205,29 @@ self.onmessage = async (event) => {
     self.postMessage({ type: 'done', runId: id, ok: false, error: `Failed to load Python: ${err?.message || err}` });
     return;
   }
+
+  // Install packages the code imports (numpy, pandas, …) from the Pyodide distribution
+  try {
+    await py.pyodide.loadPackagesFromImports(code, {
+      messageCallback: (msg) => { if (/^Loading|^Loaded/.test(msg)) outBuffer.push({ stream: 'system', text: msg }); scheduleFlush(); },
+      errorCallback: (msg) => { outBuffer.push({ stream: 'stderr', text: msg }); scheduleFlush(); },
+    });
+  } catch (err) {
+    // Unknown imports surface as a normal ModuleNotFoundError when the code runs
+    outBuffer.push({ stream: 'stderr', text: `Package install failed: ${err?.message || err}` });
+  }
+
+  // Program input: each input() call consumes one line; echoed like a terminal would
+  const lines = Array.isArray(stdin) ? stdin.slice() : [];
+  py.pyodide.setStdin({
+    autoEOF: false,
+    stdin: () => {
+      if (!lines.length) return null; // EOF → EOFError in Python
+      const line = String(lines.shift());
+      self.nexideOutput('stdout', line + '\n');
+      return line + '\n';
+    },
+  });
 
   // Fresh namespace per run: no state leaks between runs, and helper names stay hidden
   const namespace = py.newDict();

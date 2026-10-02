@@ -1,10 +1,13 @@
-import { useRef, useEffect } from 'react';
-import { Trash2, Terminal } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
+import { Trash2, Terminal, Keyboard } from 'lucide-react';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
+import { stdinLines } from '../runtime/output';
 
-export function ConsoleOutput({ lines, onClear }) {
+export function ConsoleOutput({ lines, onClear, stdin = '', onStdinChange }) {
   const bottomRef = useRef(null);
+  const [showInput, setShowInput] = useState(!!stdin);
+  const inputCount = stdinLines(stdin).length;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -30,7 +33,40 @@ export function ConsoleOutput({ lines, onClear }) {
           <Trash2 size={10} />
           Clear
         </button>
+
+        {onStdinChange && (
+          <button
+            id="btn-toggle-stdin"
+            className={`btn-clear ${showInput ? 'active' : ''}`}
+            onClick={() => setShowInput(v => !v)}
+            aria-expanded={showInput}
+            aria-controls="console-stdin"
+            title="Program input: one line per input() / prompt() call"
+          >
+            <Keyboard size={10} />
+            Input{inputCount > 0 ? ` (${inputCount})` : ''}
+          </button>
+        )}
       </div>
+
+      {showInput && onStdinChange && (
+        <textarea
+          id="console-stdin"
+          className="console-stdin"
+          value={stdin}
+          onChange={e => onStdinChange(e.target.value)}
+          placeholder="Program input (stdin): one line per input() / prompt() call"
+          spellCheck={false}
+          rows={3}
+          aria-label="Program input"
+          style={{
+            width: '100%', resize: 'vertical', boxSizing: 'border-box',
+            background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+            border: 'none', borderBottom: '1px solid var(--border)',
+            padding: '6px 10px', fontFamily: 'var(--font-mono)', fontSize: 12, outline: 'none',
+          }}
+        />
+      )}
 
       <div className="console-lines" aria-live="polite" aria-label="Console output">
         {lines.length === 0 ? (
