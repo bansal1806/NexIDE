@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { executeJs } from './executeJs';
-import { resolveSpecifier, usesModules, collectBareImports, isValidPackageSpec } from './modules';
+import { resolveSpecifier, usesModules, collectBareImports, isValidPackageSpec, resolvePackageId, loadPinnedPackage } from './modules';
 
 async function run(code, opts) {
   const logs = [];
@@ -82,10 +82,10 @@ describe('npm packages (bare imports)', () => {
     'lodash/fp': { default: { identity: (x) => x } },
   };
   const loads = [];
-  const loadPackage = async (spec) => {
+  const loadPackage = async (spec, lockedId) => {
     loads.push(spec);
     if (!(spec in fakeRegistry)) throw new Error(`404 ${spec}`);
-    return fakeRegistry[spec];
+    return { id: lockedId || `${spec}@9.9.9`, namespace: fakeRegistry[spec], fromLock: !!lockedId };
   };
 
   it('collects bare imports transitively through workspace files', () => {
@@ -109,7 +109,7 @@ describe('npm packages (bare imports)', () => {
     const { result, logs } = await run(code, { path: 'main.js', files, loadPackage });
     expect(result.ok).toBe(true);
     expect(logs.at(-1)).toBe('40 ok hi ada');
-    expect(logs.filter(l => /Loading .* from esm\.sh/.test(l))).toHaveLength(3);
+    expect(logs.filter(l => /📦 .* → .*pinned/.test(l))).toHaveLength(3);
     expect(loads.sort()).toEqual(['@scope/greet@1.2.0', 'lodash/fp', 'tiny-math']);
   });
 
@@ -134,5 +134,38 @@ describe('cross-file debugging', () => {
     // file order: entry → library → back to entry
     const files_ = steps.map(s => s.file);
     expect(files_.indexOf('lib/calc.js')).toBeGreaterThan(files_.indexOf('main.js'));
+  });
+});
+
+describe('package pinning', () => {
+  const esmResponse = (id) => ({
+    ok: true,
+    status: 200,
+    text: async () => `/* esm.sh - ${id} */\nexport * from "/${id}/es2022/x.mjs";`,
+  });
+
+  it('resolves the exact version esm.sh served', async () => {
+    expect(await resolvePackageId('lodash/fp', async () => esmResponse('lodash@4.18.1/fp'))).toBe('lodash@4.18.1/fp');
+    await expect(resolvePackageId('nope-pkg', async () => ({ ok: false, status: 404 }))).rejects.toThrow(/not found/);
+  });
+
+  it('imports the locked version without resolving again', async () => {
+    const fetchImpl = async () => { throw new Error('should not fetch'); };
+    const imported = [];
+    const importImpl = async (url) => { imported.push(url); return { default: 1 }; };
+    const r = await loadPinnedPackage('dayjs', 'dayjs@1.11.23', { fetchImpl, importImpl });
+    expect(r).toMatchObject({ id: 'dayjs@1.11.23', fromLock: true });
+    expect(imported).toEqual(['https://esm.sh/dayjs@1.11.23']);
+  });
+
+  it('pins on first use and reports the pins from executeJs', async () => {
+    const importImpl = async () => ({ default: (s) => s.toUpperCase() });
+    const loadPackage = (spec, locked) => loadPinnedPackage(spec, locked, { fetchImpl: async () => esmResponse('shout@2.0.1'), importImpl });
+    const first = await run("import shout from 'shout';\nconsole.log(shout('hi'));", { loadPackage });
+    expect(first.result.pins).toEqual({ shout: 'shout@2.0.1' });
+    expect(first.logs).toContain('HI');
+    const second = await run("import shout from 'shout';\nconsole.log(shout('again'));", { loadPackage, packageLock: first.result.pins });
+    expect(second.logs).toContain('📦 shout@2.0.1');
+    expect(second.logs).toContain('AGAIN');
   });
 });

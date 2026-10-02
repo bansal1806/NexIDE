@@ -27,7 +27,7 @@ function onLog(type, text) {
 }
 
 self.onmessage = async (event) => {
-  const { type, id, code, language, debug, maxSteps, path, files } = event.data || {};
+  const { type, id, code, language, debug, maxSteps, path, files, packageLock } = event.data || {};
   if (type !== 'run') return;
 
   // Program input for prompt(): pre-filled Input-box lines first, then (when the page is
@@ -66,6 +66,7 @@ self.onmessage = async (event) => {
     maxSteps,
     path: path || (language === 'typescript' ? 'main.ts' : 'main.js'),
     files: files || {},
+    packageLock: packageLock || {},
     onLog,
     onSteps: steps => self.postMessage({ type: 'steps', runId, steps }),
   });

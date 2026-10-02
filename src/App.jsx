@@ -4,7 +4,6 @@ import { useAuth } from './hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDebugger } from './hooks/useDebugger';
 import { DebugTimeline } from './components/DebugTimeline';
-import { VariableInspector } from './components/VariableInspector';
 import {
   Settings as SettingsIcon, TerminalSquare, Files, Map as MapIcon, MessageSquare,
 } from 'lucide-react';
@@ -19,8 +18,12 @@ import { useMonacoWorkspace } from './hooks/useMonacoWorkspace';
 
 // Services
 import { fetchFileContent } from './services/github';
-import { loadSettings, saveSettings, pickSecrets, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
-import { getSecretStore } from './services/secretStore';
+import { useNotice } from './hooks/useNotice';
+import { useSettings } from './hooks/useSettings';
+import { useProgramInput } from './hooks/useProgramInput';
+import { usePackageLocks } from './hooks/usePackageLocks';
+import { useDeployRecovery } from './hooks/useDeployRecovery';
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
 import { stdinLines } from './runtime/output';
 import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
@@ -28,22 +31,18 @@ import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRel
 // Components
 import { FileExplorer }   from './components/FileExplorer';
 import { STARTERS }       from './components/starters';
-import { ConsoleOutput }  from './components/ConsoleOutput';
-import { AIChat }         from './components/AIChat';
 import { StatusBar }      from './components/StatusBar';
 import { TopBar }         from './components/TopBar';
-import { Terminal }       from './components/Terminal';
 import { Settings }       from './components/Settings';
 import { GitHubModal }    from './components/GitHubModal';
 import { WelcomeScreen }  from './components/WelcomeScreen';
 import { CommandPalette } from './components/CommandPalette';
 import { AuthModal }      from './components/AuthModal';
+import { BottomPanel, RightPanel } from './components/Panels';
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
 
-// Heavy pieces (Monaco, d3, sucrase) load on demand
+// Monaco loads on demand (the panels lazy-load d3 and sucrase themselves)
 const Editor      = lazy(() => import('./components/Editor'));
-const CodeMap     = lazy(() => import('./components/CodeMap'));
-const LivePreview = lazy(() => import('./components/LivePreview'));
 
 const RUNNABLE = new Set(['javascript', 'typescript', 'python']);
 
@@ -62,74 +61,8 @@ export default function App() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
-  // ── Notices (status bar) ─────────────────────────────────────────
-  const [notice, setNotice] = useState(null);
-  const notify = useCallback((type, text) => setNotice({ type, text, id: Date.now() }), []);
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 6000);
-    return () => clearTimeout(t);
-  }, [notice]);
-
-  // ── Settings: local always; cloud only after this user's cloud copy was merged ──
-  const [settings, setSettings] = useState(loadSettings);
-  const settingsRef = useRef(settings);
-  const cloudSyncedForRef = useRef(null);
-  const [secretsReady, setSecretsReady] = useState(false);
-
-  // Load API keys from the encrypted store. Nothing is persisted until this finishes,
-  // so legacy plaintext keys are re-saved encrypted before being dropped from localStorage.
-  useEffect(() => {
-    let cancelled = false;
-    getSecretStore().load()
-      .then(({ secrets, remembered }) => {
-        if (cancelled) return;
-        const found = Object.fromEntries(Object.entries(secrets).filter(([, v]) => typeof v === 'string' && v));
-        setSettings(prev => ({ ...prev, ...found, ...(remembered === false ? { rememberSecrets: false } : {}) }));
-      })
-      .catch(e => console.warn('Secure key storage unavailable; keys will not be saved:', e))
-      .finally(() => { if (!cancelled) setSecretsReady(true); });
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    settingsRef.current = settings;
-    if (!secretsReady) return;
-    const t = setTimeout(async () => {
-      // Encrypted copy first: plaintext (legacy) keys are only dropped from localStorage
-      // by saveSettings() once the encrypted copy is safely written.
-      try {
-        await getSecretStore().save(pickSecrets(settings), settings.rememberSecrets !== false);
-      } catch (e) {
-        console.warn('Could not store API keys securely:', e);
-        notify('error', 'This browser blocked secure storage — API keys will be forgotten when you close the tab.');
-      }
-      saveSettings(settings);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [settings, secretsReady, notify]);
-
-  useEffect(() => {
-    cloudSyncedForRef.current = null;
-    if (!userId) return;
-    let cancelled = false;
-    syncSettingsWithCloud(userId, settingsRef.current)
-      .then(merged => {
-        if (cancelled) return;
-        cloudSyncedForRef.current = userId;
-        setSettings(merged);
-      })
-      .catch(e => console.error('Settings sync failed:', e));
-    return () => { cancelled = true; };
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId || cloudSyncedForRef.current !== userId) return;
-    const t = setTimeout(() => {
-      persistSettingsToCloud(userId, settings).catch(e => console.error('Settings upload failed:', e));
-    }, 1000);
-    return () => clearTimeout(t);
-  }, [settings, userId]);
+  const { notice, notify } = useNotice();
+  const [settings, setSettings] = useSettings(userId, notify);
 
   // ── Cloud projects ───────────────────────────────────────────────
   const [cloudMode, setCloudMode] = useState(false);
@@ -240,26 +173,9 @@ export default function App() {
   // ── Cursor / editor ──────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   // Program input (console "Input" box), remembered per file across reloads
-  const STDIN_KEY = 'nexide:stdin';
-  const [stdinByPath, setStdinByPath] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STDIN_KEY)) || {}; } catch { return {}; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(STDIN_KEY, JSON.stringify(stdinByPath)); } catch { /* storage full/blocked */ }
-  }, [stdinByPath]);
-  const stdinText = activeTab ? (stdinByPath[activeTab.path] || '') : '';
-  const setStdinText = useCallback((text) => {
-    const path = activeTabRef.current?.path;
-    if (!path) return;
-    setStdinByPath(prev => {
-      const next = { ...prev };
-      delete next[path];
-      if (text) next[path] = text.slice(0, 10_000); // re-insert last = most recently used
-      const keys = Object.keys(next);
-      keys.slice(0, Math.max(0, keys.length - 50)).forEach(k => delete next[k]);
-      return next;
-    });
-  }, []);
+  const { stdinFor, setStdinFor } = useProgramInput();
+  const stdinText = stdinFor(activeTab?.path);
+  const setStdinText = useCallback((text) => setStdinFor(activeTabRef.current?.path, text), [setStdinFor]);
   const editorRef = useRef(null);
 
   // The active tab with the editor's *live* text. React state lags the editor by a render,
@@ -465,14 +381,27 @@ export default function App() {
     return files;
   }, [workspaceFiles, fileTree]);
 
+  // npm packages are pinned per workspace on first use (reproducible runs; pinned esm.sh URLs
+  // are immutable, so the service worker can serve them offline)
+  const workspaceKey = cloudMode ? `cloud:${activeProjectId}`
+    : githubMode ? `github:${githubInfo?.owner}/${githubInfo?.repo}`
+    : fs.rootName ? `local:${fs.rootName}` : 'scratch';
+  const { lockFor, savePins, clearPins: clearWorkspacePins } = usePackageLocks();
+  const clearPins = useCallback(() => {
+    clearWorkspacePins(workspaceKey);
+    notify('info', 'npm packages will resolve to their latest versions on the next run.');
+  }, [clearWorkspacePins, workspaceKey, notify]);
+
   const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
-    const opts = { ...options, stdin: stdinLines(stdinByPath[tab.path] || ''), path: tab.path, files: buildRunFiles(tab) };
-    return tab.lang === 'python'
-      ? runPython(tab.content, opts)
-      : runJs(tab.content, tab.lang, opts);
-  }, [runPython, runJs, stdinByPath, buildRunFiles]);
+    const opts = { ...options, stdin: stdinLines(stdinFor(tab.path)), path: tab.path, files: buildRunFiles(tab) };
+    if (tab.lang === 'python') return runPython(tab.content, opts);
+    const key = workspaceKey;
+    const run = runJs(tab.content, tab.lang, { ...opts, packageLock: lockFor(key) });
+    run?.then?.(result => savePins(key, result?.pins));
+    return run;
+  }, [runPython, runJs, stdinFor, buildRunFiles, workspaceKey, lockFor, savePins]);
 
   const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 
@@ -611,8 +540,9 @@ export default function App() {
       case 'toggle-terminal': setBottomPanel(v => v === 'terminal' ? null : 'terminal'); break;
       case 'open-settings':   setSettingsOpen(true); break;
       case 'run-file':        runCode();           break;
+      case 'npm-update-pins': clearPins();         break;
     }
-  }, [handleOpenFolder, runCode]);
+  }, [handleOpenFolder, runCode, clearPins]);
 
   const handleTerminalRun = useCallback(async (path) => {
     const tab = await openFileInTab({ path, name: path.split('/').pop() });
@@ -621,50 +551,27 @@ export default function App() {
     runTab(tab);
   }, [openFileInTab, runTab, notify]);
 
-  // ── Global keyboard shortcuts ────────────────────────────────────
-  // A lazy chunk from the previous deployment is gone (new version deployed while this tab
-  // was open): reload transparently if nothing is unsaved, otherwise ask the user to save first.
-  useEffect(() => {
-    // Don't preventDefault(): that makes Vite resolve the import with `undefined`. Letting it
-    // reject means ChunkErrorBoundary sees the real error and offers Reload.
-    const onPreloadError = () => {
-      const RELOAD_KEY = 'nexide:reloaded-after-deploy';
-      let recentlyReloaded = false;
-      try { recentlyReloaded = Date.now() - Number(sessionStorage.getItem(RELOAD_KEY) || 0) < 60_000; } catch { /* storage blocked */ }
-      if (!tabsRef.current.some(t => t.dirty) && !recentlyReloaded) {
-        try { sessionStorage.setItem(RELOAD_KEY, String(Date.now())); } catch { /* storage blocked */ }
-        window.location.reload();
-      } else {
-        notify('error', 'NexIDE was updated — save your work, then reload the page.');
-      }
-    };
-    window.addEventListener('vite:preloadError', onPreloadError);
-    return () => window.removeEventListener('vite:preloadError', onPreloadError);
-  }, [notify]);
+  // ── Deploy recovery & global keyboard shortcuts ─────────────────
+  const hasUnsavedWork = useCallback(() => tabsRef.current.some(t => t.dirty), []);
+  useDeployRecovery(hasUnsavedWork, notify);
 
   const anyModalOpen = settingsOpen || paletteOpen || githubOpen || authOpen;
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key === 'F5') { e.preventDefault(); if (activeTabRef.current) runDebug(); return; }
-      if (isDebugging) {
-        if (e.key === 'F10') { e.preventDefault(); stepForward(); return; }
-        if (e.key === 'F8')  { e.preventDefault(); (e.shiftKey ? jumpToPrevBreakpoint : jumpToNextBreakpoint)(); return; }
-        if (e.key === 'Escape' && !anyModalOpen) { exitDebug(); return; }
-      }
-
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const key = e.key.toLowerCase();
-      if (key === 'p')     { e.preventDefault(); setPaletteOpen(v => !v); }
-      if (key === 's')     { e.preventDefault(); saveFile(); }
-      if (key === 'enter') { e.preventDefault(); runCode(); }
-      if (key === 'b')     { e.preventDefault(); setSidebarOpen(v => !v); }
-      if (key === '\\')    { e.preventDefault(); setRightPanel(p => p === 'ai' ? null : 'ai'); }
-      if (key === '`')     { e.preventDefault(); setBottomPanel(v => v === 'terminal' ? null : 'terminal'); }
-      if (key === ',')     { e.preventDefault(); setSettingsOpen(true); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [saveFile, runCode, runDebug, isDebugging, stepForward, jumpToNextBreakpoint, jumpToPrevBreakpoint, exitDebug, anyModalOpen]);
+  useGlobalShortcuts({
+    isDebugging,
+    anyModalOpen,
+    onDebug: () => { if (activeTabRef.current) runDebug(); },
+    onStep: stepForward,
+    onNextBreakpoint: jumpToNextBreakpoint,
+    onPrevBreakpoint: jumpToPrevBreakpoint,
+    onExitDebug: exitDebug,
+    onTogglePalette: () => setPaletteOpen(v => !v),
+    onSave: saveFile,
+    onRun: runCode,
+    onToggleSidebar: () => setSidebarOpen(v => !v),
+    onToggleAi: () => setRightPanel(p => p === 'ai' ? null : 'ai'),
+    onToggleTerminal: () => setBottomPanel(v => v === 'terminal' ? null : 'terminal'),
+    onOpenSettings: () => setSettingsOpen(true),
+  });
 
   // ── Derived view state ───────────────────────────────────────────
   const activeProjectName = visibleCloudProjects.find(p => p.id === activeProjectId)?.name;
@@ -684,7 +591,6 @@ export default function App() {
     frames[0] = { ...frames[0], line: currentSnapshot.line };
     return frames;
   }, [currentSnapshot]);
-  const panelFallback = <div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
     <div className="app" id="nexide-app" data-theme={settings.theme || 'nexide-dark'}>
@@ -823,95 +729,49 @@ export default function App() {
           )}
 
           {bottomPanel && (
-            <div className="bottom-panel">
-              <div className="panel-tabs">
-                {['terminal', 'console'].map(p => (
-                  <button key={p} className={`panel-tab ${bottomPanel === p ? 'active' : ''}`} onClick={() => setBottomPanel(p)}>
-                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                  </button>
-                ))}
-                <div style={{ flex: 1 }} />
-                <button className="panel-close-btn" onClick={() => setBottomPanel(null)} aria-label="Close panel">×</button>
-              </div>
-              <div className="panel-content">
-                {bottomPanel === 'terminal' && (
-                  <Terminal
-                    open={true}
-                    fileTree={fileTree}
-                    activeFilePath={activeTab?.path}
-                    onRunFile={handleTerminalRun}
-                    onClose={() => setBottomPanel(null)}
-                  />
-                )}
-                {bottomPanel === 'console' && (
-                  <ConsoleOutput
-                    lines={consoleOutput}
-                    onClear={clearConsole}
-                    stdin={stdinText}
-                    onStdinChange={setStdinText}
-                    inputRequest={isPythonTab ? pyInputRequest : jsInputRequest}
-                    onSubmitInput={isPythonTab ? submitPyInput : submitJsInput}
-                    onEndInput={isPythonTab ? endPyInput : endJsInput}
-                  />
-                )}
-              </div>
-            </div>
+            <BottomPanel
+              panel={bottomPanel}
+              onSelect={setBottomPanel}
+              onClose={() => setBottomPanel(null)}
+              terminal={{ fileTree, activeFilePath: activeTab?.path, onRunFile: handleTerminalRun }}
+              console={{
+                lines: consoleOutput,
+                onClear: clearConsole,
+                stdin: stdinText,
+                onStdinChange: setStdinText,
+                inputRequest: isPythonTab ? pyInputRequest : jsInputRequest,
+                onSubmitInput: isPythonTab ? submitPyInput : submitJsInput,
+                onEndInput: isPythonTab ? endPyInput : endJsInput,
+              }}
+            />
           )}
         </div>
 
         {rightPanel && (
-          <div className="right-panel">
-            <div className="panel-tabs">
-              {['preview', 'ai', 'map', 'debug'].map(p => (
-                <button key={p} className={`panel-tab ${rightPanel === p ? 'active' : ''}`} onClick={() => setRightPanel(p)}>
-                  {p.charAt(0).toUpperCase() + p.slice(1)}
-                </button>
-              ))}
-              <div style={{ flex: 1 }} />
-              <button className="panel-close-btn" onClick={() => setRightPanel(null)} aria-label="Close panel">×</button>
-            </div>
-            <div className="panel-content">
-              <ChunkErrorBoundary name="Panel" key={rightPanel}><Suspense fallback={panelFallback}>
-                <AnimatePresence mode="wait">
-                  {rightPanel === 'preview' && (
-                    <motion.div key="preview" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                      <LivePreview code={activeTab?.content || ''} language={activeTab?.lang || 'plaintext'} onConsoleMessage={addConsoleMessage} />
-                    </motion.div>
-                  )}
-                  {rightPanel === 'ai' && (
-                    <motion.div key="ai" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                      <AIChat
-                        gemini={gemini}
-                        editorCode={activeTab?.content || ''}
-                        language={activeTab?.lang || 'plaintext'}
-                        hasApiKey={!!settings.geminiApiKey}
-                        isSignedIn={!!user}
-                        onApiKeyNeeded={() => setSettingsOpen(true)}
-                      />
-                    </motion.div>
-                  )}
-                  {rightPanel === 'map' && (
-                    <motion.div key="map" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                      <CodeMap activeTab={activeTab} fileTree={fileTree} onNodeClick={handleMapNodeClick} />
-                    </motion.div>
-                  )}
-                  {rightPanel === 'debug' && (
-                    <motion.div key="debug" style={{ height: '100%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                      <VariableInspector
-                        snapshot={currentSnapshot}
-                        previousSnapshot={previousSnapshot}
-                        changedVars={changedVars}
-                        watchList={watchList}
-                        onAddWatch={addWatch}
-                        onRemoveWatch={removeWatch}
-                        callStack={inspectorStack}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </Suspense></ChunkErrorBoundary>
-            </div>
-          </div>
+          <RightPanel
+            panel={rightPanel}
+            onSelect={setRightPanel}
+            onClose={() => setRightPanel(null)}
+            preview={{ code: activeTab?.content || '', language: activeTab?.lang || 'plaintext', onConsoleMessage: addConsoleMessage }}
+            ai={{
+              gemini,
+              editorCode: activeTab?.content || '',
+              language: activeTab?.lang || 'plaintext',
+              hasApiKey: !!settings.geminiApiKey,
+              isSignedIn: !!user,
+              onApiKeyNeeded: () => setSettingsOpen(true),
+            }}
+            map={{ activeTab, fileTree, onNodeClick: handleMapNodeClick }}
+            debug={{
+              snapshot: currentSnapshot,
+              previousSnapshot,
+              changedVars,
+              watchList,
+              onAddWatch: addWatch,
+              onRemoveWatch: removeWatch,
+              callStack: inspectorStack,
+            }}
+          />
         )}
 
         {isDebugging && snapshots.length > 0 && (

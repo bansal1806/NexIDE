@@ -29,7 +29,7 @@
       ]
     },
     {
-      "source": "/((?!preview\\.html|pyodide\\.worker\\.js|assets/jsRunner\\.worker-).*)",
+      "source": "/((?!preview\\.html|pyodide\\.worker\\.js|assets/jsRunner\\.worker-|sw\\.js).*)",
       "headers": [
         {
           "key": "X-Frame-Options",
@@ -124,6 +124,10 @@
         {
           "key": "Cache-Control",
           "value": "no-cache"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'none'; connect-src 'self' https://esm.sh"
         }
       ]
     }

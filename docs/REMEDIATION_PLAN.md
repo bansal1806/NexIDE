@@ -148,8 +148,19 @@ Safari lacks `credentialless`, so there the page isn't isolated and input falls 
   Cached responses keep COOP/COEP, so the page stays cross-origin isolated offline. Production builds only.
 - Verification: lint clean · unit 71/71 · E2E 48/48 (incl. going offline and running Python).
 
+## Phase 7 — Reproducible/offline npm packages, App.jsx split (branch `phase-7`)
+
+- [x] **npm pinning**: unversioned imports resolve once to the exact esm.sh build and are pinned per workspace
+  (local folder / GitHub repo / cloud project / scratch); "Packages: Update pinned npm versions" re-resolves.
+- [x] **Offline npm**: the service worker caches immutable, versioned esm.sh URLs.
+  Found & fixed: `/sw.js` inherited the app CSP, whose `connect-src` blocked the service worker's own fetch to
+  esm.sh — it would have broken npm imports for every page the worker controls; it now has its own minimal CSP.
+- [x] **Refactor**: `App.jsx` 989 → 818 lines — settings, notices, per-file input, package locks, deploy recovery
+  and shortcuts are hooks; terminal/console and preview/AI/map/debug panels are components. No behaviour change.
+- Verification: lint clean · unit 74/74 · E2E 50/50 (incl. pin, then run the package offline).
+
 ## Ideas for a later phase
 
-- Pin npm package versions per workspace (a small lockfile) for reproducible runs.
-- Cache npm packages from esm.sh for offline use (opt-in).
-- Split `App.jsx` (~950 lines) into workspace / runner / debugger modules.
+- Extract tab/workspace management from `App.jsx` into a `useWorkspace` hook (the largest remaining block).
+- Show the workspace's pinned packages (and let users edit them) in a small panel.
+- Restore a Supabase project for production sign-in and cloud workspaces (**[YOU]**, dashboard).

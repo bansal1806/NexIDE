@@ -60,6 +60,30 @@ export function collectBareImports(entryCode, entryPath, files) {
   return [...bare];
 }
 
+// esm.sh names the exact build it served in a leading comment: /* esm.sh - lodash@4.18.1/fp */
+const ESM_ID_COMMENT = /\/\*\s*esm\.sh\s*-\s*(\S+)\s*\*\//;
+
+/** Resolve "lodash-es" → "lodash-es@4.18.1" (or "lodash/fp" → "lodash@4.18.1/fp"). */
+export async function resolvePackageId(spec, fetchImpl = fetch) {
+  const res = await fetchImpl(`${PACKAGE_CDN}${spec}`);
+  if (!res.ok) throw new Error(res.status === 404 ? 'package not found' : `HTTP ${res.status}`);
+  const id = ESM_ID_COMMENT.exec(await res.text())?.[1];
+  return id && isValidPackageSpec(id) ? id : spec;
+}
+
+/**
+ * Load a package, pinned: a locked id is imported directly (immutable URL, works offline via
+ * the service worker); otherwise the latest version is resolved once and returned as the new pin.
+ * @returns {Promise<{ id: string, namespace: object, fromLock: boolean }>}
+ */
+export async function loadPinnedPackage(spec, lockedId, {
+  fetchImpl = (url) => fetch(url),
+  importImpl = (url) => import(/* @vite-ignore */ url),
+} = {}) {
+  const id = lockedId && isValidPackageSpec(lockedId) ? lockedId : await resolvePackageId(spec, fetchImpl);
+  return { id, namespace: await importImpl(`${PACKAGE_CDN}${id}`), fromLock: id === lockedId };
+}
+
 /** ES module namespace → what Sucrase's CommonJS interop expects. */
 export function packageExports(namespace) {
   return { __esModule: true, ...namespace };

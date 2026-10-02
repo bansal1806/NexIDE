@@ -81,7 +81,7 @@ export function useCodeRunner() {
           }
           addLines(lines);
           setStatus(data.ok ? 'success' : 'error');
-          finish({ ok: data.ok, error: data.error, line: data.line });
+          finish({ ok: data.ok, error: data.error, line: data.line, pins: data.pins || {} });
           // The worker stays alive so pending timers/promises can keep logging until the next run or Stop.
         }
       };
@@ -100,6 +100,7 @@ export function useCodeRunner() {
         path: options.path,
         files: options.files || {},
         stdinSab: channel?.sab ?? null,
+        packageLock: options.packageLock || {},
       });
     });
   }, [addLine, addLines, finish, killWorker, openStdin, askStdin]);
