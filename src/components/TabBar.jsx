@@ -51,6 +51,7 @@ export function TabBar({ tabs, activeId, onActivate, onClose }) {
             role="tab"
             aria-selected={active}
             aria-controls={EDITOR_PANEL_ID}
+            aria-keyshortcuts="Delete"
             tabIndex={active ? 0 : -1}
             title={`${tab.path}${tab.dirty ? ' (unsaved)' : ''}`}
             onClick={() => onActivate(tab.id)}
@@ -60,15 +61,16 @@ export function TabBar({ tabs, activeId, onActivate, onClose }) {
           >
             <span className="tab-name">{tab.name}</span>
             {tab.dirty && <span className="tab-unsaved" aria-label="unsaved changes" />}
-            <button
+            {/* Mouse affordance only: a button inside role="tab" would be nested interactive content.
+                Keyboard and screen-reader users close with Delete (announced via aria-keyshortcuts). */}
+            <span
               className="tab-close"
-              tabIndex={-1}
+              aria-hidden="true"
               onClick={e => { e.stopPropagation(); onClose(tab.id); }}
-              aria-label={`Close ${tab.name}`}
               title="Close (Delete when the tab is focused, or middle-click)"
             >
               ×
-            </button>
+            </span>
           </div>
         );
       })}

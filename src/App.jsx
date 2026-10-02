@@ -290,7 +290,7 @@ export default function App() {
       />
 
       <div className="app-body" id="app-body">
-        <div className="activity-bar" id="activity-bar">
+        <div className="activity-bar" id="activity-bar" role="navigation" aria-label="Activity bar">
           <button className={`activity-btn ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(v => !v)} title="Explorer" aria-label="Explorer">
             <Files size={18} />
           </button>
@@ -313,6 +313,8 @@ export default function App() {
           {sidebarOpen && (
             <motion.div
               className="sidebar"
+              role="complementary"
+              aria-label="Explorer"
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 220, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
@@ -340,7 +342,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <div className="editor-column" id="editor-column">
+        <div className="editor-column" id="editor-column" role="main">
           {showWelcome ? (
             <WelcomeScreen
               onOpenFolder={handleOpenFolder}

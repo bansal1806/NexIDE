@@ -158,7 +158,7 @@ function PaletteInner({ onClose, openTabs, fileTree, onOpenFile, onCommand }) {
 export function CommandPalette({ open, onClose, openTabs, fileTree, onOpenFile, onCommand }) {
   if (!open) return null;
   return (
-    <div className="modal-overlay palette-overlay" onClick={onClose} id="command-palette">
+    <div className="modal-overlay palette-overlay" onClick={onClose} id="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
       <AnimatePresence>
         <PaletteInner
           key="palette"

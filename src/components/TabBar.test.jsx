@@ -39,17 +39,22 @@ describe('TabBar', () => {
     expect(onActivate.mock.calls.map(c => c[0])).toEqual([3, 1, 1, 3, 1, 3]);
   });
 
-  it('closes with Delete, the × button, or middle-click — without activating', () => {
+  it('closes with Delete, the × affordance, or middle-click — without activating', () => {
     const { onActivate, onClose, tabEls } = setup(2);
     fireEvent.keyDown(tabEls[0], { key: 'Delete' });
-    fireEvent.click(screen.getByRole('button', { name: 'Close c.ts' }));
+    fireEvent.click(tabEls[2].querySelector('.tab-close'));
     fireEvent(tabEls[1], new MouseEvent('auxclick', { bubbles: true, button: 1 }));
     expect(onClose.mock.calls.map(c => c[0])).toEqual([1, 3, 2]);
     expect(onActivate).not.toHaveBeenCalled();
   });
 
-  it('keeps the × button out of the tab order (Delete is the keyboard path)', () => {
-    setup(1);
-    expect(screen.getByRole('button', { name: 'Close a.js' }).tabIndex).toBe(-1);
+  it('has no interactive content nested in tabs; Delete is announced as the shortcut', () => {
+    const { tabEls } = setup(1);
+    for (const tab of tabEls) {
+      expect(tab.querySelector('button, a, input, [tabindex]:not([tabindex="-1"])')).toBeNull();
+      expect(tab.querySelector('.tab-close').getAttribute('aria-hidden')).toBe('true');
+      expect(tab.getAttribute('aria-keyshortcuts')).toBe('Delete');
+    }
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
   });
 });

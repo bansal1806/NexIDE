@@ -136,7 +136,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, on
       <div className="ai-chat-header">
         <div className="ai-avatar" aria-hidden="true">⚡</div>
         <div className="ai-chat-info">
-          <h3>NexIDE AI</h3>
+          <h2>NexIDE AI</h2>
           <div className="ai-status">
             <div className="ai-status-dot" aria-hidden="true" />
             {hasApiKey ? 'Gemini · your key' : isSignedIn ? 'Gemini · built-in' : 'Setup required'}

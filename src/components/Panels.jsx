@@ -45,7 +45,7 @@ export function BottomPanel({ panel, onSelect, onClose, terminal, console: conso
 /** Right panel: live preview, AI chat, code map, debugger state. Each section's props are passed through. */
 export function RightPanel({ panel, onSelect, onClose, preview, ai, map, debug, packages }) {
   return (
-    <div className="right-panel">
+    <div className="right-panel" role="complementary" aria-label="Side panel">
       <PanelTabs tabs={['preview', 'ai', 'map', 'debug', 'packages']} active={panel} onSelect={onSelect} onClose={onClose} />
       <div className="panel-content">
         <ChunkErrorBoundary name="Panel" key={panel}>

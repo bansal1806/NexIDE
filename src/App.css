@@ -131,7 +131,7 @@
   gap: 6px;
   padding: 6px 14px;
   height: 30px;
-  background: var(--accent-green);
+  background: #087f58; /* white text 5:1 (WCAG AA) */
   border: none;
   border-radius: var(--radius-sm);
   color: #fff;
@@ -144,7 +144,7 @@
 }
 
 .btn-run:hover:not(:disabled) {
-  background: #0da974;
+  background: #066b4a;
   box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
 }
 
@@ -488,7 +488,7 @@
   flex-shrink: 0;
 }
 
-.ai-chat-info h3 {
+.ai-chat-info h2 {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
@@ -1212,7 +1212,7 @@
 .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
 .settings-checkbox { width: 16px; height: 16px; accent-color: var(--accent-violet); cursor: pointer; }
 .settings-hint { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
-.settings-hint a { color: var(--accent-cyan); text-decoration: none; }
+.settings-hint a { color: var(--accent-cyan); text-decoration: underline; text-underline-offset: 2px; }
 .settings-hint a:hover { text-decoration: underline; }
 
 /* ─── GitHub Modal ─── */

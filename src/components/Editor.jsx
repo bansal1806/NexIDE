@@ -13,7 +13,7 @@ const MONACO_THEMES = {
 };
 
 const BASE_RULES = [
-  { token: 'comment',    foreground: '565870', fontStyle: 'italic' },
+  { token: 'comment',    foreground: '868ba4', fontStyle: 'italic' },
   { token: 'keyword',    foreground: 'a855f7', fontStyle: 'bold' },
   { token: 'string',     foreground: '6ee7b7' },
   { token: 'number',     foreground: 'f97316' },

@@ -100,7 +100,7 @@ export function ConsoleOutput({ lines, onClear, stdin = '', onStdinChange, input
         />
       )}
 
-      <div className="console-lines" aria-live="polite" aria-label="Console output">
+      <div className="console-lines" aria-live="polite" aria-label="Console output" role="log" tabIndex={0}>
         {lines.length === 0 ? (
           <div className="console-empty">
             <span className="console-empty-icon">▶</span>
