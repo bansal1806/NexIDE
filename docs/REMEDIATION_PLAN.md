@@ -95,8 +95,20 @@ Items marked **[YOU]** need dashboard access and cannot be done from code.
 **[YOU]** Optional: create an Upstash Redis (or Vercel KV) store and set `UPSTASH_REDIS_REST_URL` /
 `UPSTASH_REDIS_REST_TOKEN` in Vercel for shared limits.
 
+## Phase 3 — CI, self-hosting, Python features (branch `phase-3`)
+
+- [x] **CI**: `.github/workflows/ci.yml` — lint, unit tests, prod-dependency audit, build + browser E2E
+  (Chrome on ubuntu-latest) on every push and PR.
+- [x] **Self-hosted Monaco**: bundled (lazy chunk) instead of jsDelivr, so no CDN code runs in the app
+  origin next to the user's session. App CSP is now `script-src 'self'` / `worker-src 'self'`; jsDelivr is
+  only allowed in the isolated Pyodide worker. TS diagnostics verified under CSP.
+  Found & fixed: Ctrl+Enter / Ctrl+S / F5 right after typing used the previous text (state lags the editor).
+- [x] **Python packages**: imports (numpy, pandas, …) install automatically from the Pyodide distribution.
+- [x] **Program input**: console Input box feeds `input()` (Python) and `prompt()` (JS); EOF hint.
+- Verification: lint clean · unit 52/52 · E2E 33/33 under production headers.
+
 ## Ideas for a later phase
 
-- Subresource integrity / self-hosting for Monaco and Pyodide (removes jsDelivr from the trust path).
-- Run E2E in CI (GitHub Actions with Chrome) on every PR.
-- Python package loading (`micropip`) UI; `input()` support via SharedArrayBuffer (needs COOP/COEP).
+- Self-host Pyodide core files (keeps jsDelivr only for optional packages).
+- Interactive stdin (type while the program waits) via SharedArrayBuffer — needs COOP/COEP.
+- Multi-file JS (ES module imports between workspace files) in the runner.
