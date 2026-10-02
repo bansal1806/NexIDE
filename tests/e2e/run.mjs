@@ -58,6 +58,24 @@ try {
   // A stored secret that user code must not be able to read
   await page.evaluate(() => localStorage.setItem('nexide:settings', JSON.stringify({ geminiApiKey: 'AIza-E2E-SECRET' })));
 
+  // ── Security headers (only when serving the production build via vite preview) ──
+  if (server) {
+    const csp = async (path) => (await page.request.get(new URL(path, BASE).href)).headers()['content-security-policy'] || '';
+    const app = await csp('/');
+    const workerFile = (await page.request.get(BASE)).ok() && await page.evaluate(async (base) => {
+      const html = await (await fetch(base)).text();
+      const entry = html.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1];
+      const js = entry ? await (await fetch(entry)).text() : '';
+      return js.match(/assets\/jsRunner\.worker-[\w-]+\.js/)?.[0] || null;
+    }, BASE);
+    check('CSP: app is strict (no unsafe-inline/eval scripts, no framing)',
+      /script-src 'self' https:\/\/cdn\.jsdelivr\.net;/.test(app) && !/script-src[^;]*unsafe/.test(app) && /frame-ancestors 'none'/.test(app));
+    check('CSP: preview host is permissive but frameable only by the app',
+      /'unsafe-inline'/.test(await csp('/preview.html')) && /frame-ancestors 'self'/.test(await csp('/preview.html')));
+    check('CSP: runner worker allows eval only for itself',
+      !!workerFile && /'unsafe-eval'/.test(await csp(`/${workerFile}`)) && /default-src 'none'/.test(await csp(`/${workerFile}`)), workerFile || 'worker chunk not found');
+  }
+
   // ── JavaScript ──
   await openTemplate('js');
   await setCode(`console.log('sync');\nsetTimeout(() => console.log('timer fired'), 50);\nawait new Promise(r => setTimeout(r, 10));\nconsole.log('awaited', {a: [1, 2]});`);
@@ -151,6 +169,15 @@ try {
   const frameText = await frame.locator('#out').innerText({ timeout: 10000 }).catch(e => `ERR ${e.message}`);
   check('Preview: renders; </script> in code does not break it', /ok$/.test(frameText.trim()), frameText.slice(0, 40));
   check('Preview: console bridged to app console', await waitConsole(/from preview/, 5000));
+
+  // HTML preview may use CDN libraries (its own CSP, not the app's)
+  await openTemplate('html');
+  await setCode(`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script></head>
+<body><p id="out">pending</p><script>document.getElementById('out').textContent = 'lodash ' + _.VERSION;</script></body></html>`);
+  await page.click('#btn-toggle-preview');
+  const libText = await page.frameLocator('#preview-iframe').locator('#out')
+    .filter({ hasText: 'lodash' }).innerText({ timeout: 15000 }).catch(() => 'not loaded');
+  check('Preview: user HTML can load CDN libraries', libText === 'lodash 4.17.21', libText);
 
   // ── Python ──
   await openTemplate('py');
