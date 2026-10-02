@@ -6,6 +6,7 @@ import { AIChat } from './AIChat';
 import { VariableInspector } from './VariableInspector';
 import { Terminal } from './Terminal';
 import { ConsoleOutput } from './ConsoleOutput';
+import { PackagesPanel } from './PackagesPanel';
 
 // Heavy panels (d3, sucrase) load on demand
 const CodeMap     = lazy(() => import('./CodeMap'));
@@ -42,10 +43,10 @@ export function BottomPanel({ panel, onSelect, onClose, terminal, console: conso
 }
 
 /** Right panel: live preview, AI chat, code map, debugger state. Each section's props are passed through. */
-export function RightPanel({ panel, onSelect, onClose, preview, ai, map, debug }) {
+export function RightPanel({ panel, onSelect, onClose, preview, ai, map, debug, packages }) {
   return (
     <div className="right-panel">
-      <PanelTabs tabs={['preview', 'ai', 'map', 'debug']} active={panel} onSelect={onSelect} onClose={onClose} />
+      <PanelTabs tabs={['preview', 'ai', 'map', 'debug', 'packages']} active={panel} onSelect={onSelect} onClose={onClose} />
       <div className="panel-content">
         <ChunkErrorBoundary name="Panel" key={panel}>
           <Suspense fallback={<div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading…</div>}>
@@ -54,6 +55,7 @@ export function RightPanel({ panel, onSelect, onClose, preview, ai, map, debug }
               {panel === 'ai' && <motion.div key="ai" {...fade}><AIChat {...ai} /></motion.div>}
               {panel === 'map' && <motion.div key="map" {...fade}><CodeMap {...map} /></motion.div>}
               {panel === 'debug' && <motion.div key="debug" {...fade}><VariableInspector {...debug} /></motion.div>}
+              {panel === 'packages' && <motion.div key="packages" {...fade}><PackagesPanel {...packages} /></motion.div>}
             </AnimatePresence>
           </Suspense>
         </ChunkErrorBoundary>
