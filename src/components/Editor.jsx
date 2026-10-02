@@ -250,9 +250,20 @@ export function Editor({
     });
 
     codeLensProviderRef.current?.dispose();
-    codeLensProviderRef.current = monaco.languages.registerCodeLensProvider(
+
+    // A layout change (e.g. a side panel opening) cancels an in-flight lens request and
+    // Monaco only re-asks on the next edit, so ask again once the layout settles.
+    const lensChanged = new monaco.Emitter();
+    let relayoutTimer = null;
+    const layoutSub = editor.onDidLayoutChange(() => {
+      clearTimeout(relayoutTimer);
+      relayoutTimer = setTimeout(() => lensChanged.fire(), 300);
+    });
+
+    const registration = monaco.languages.registerCodeLensProvider(
       ['javascript', 'typescript', 'python'],
       {
+        onDidChange: lensChanged.event,
         provideCodeLenses(model) {
           const lenses = [];
           const lineCount = model.getLineCount();
@@ -272,6 +283,14 @@ export function Editor({
         resolveCodeLens: (_model, codeLens) => codeLens,
       }
     );
+    codeLensProviderRef.current = {
+      dispose() {
+        clearTimeout(relayoutTimer);
+        layoutSub.dispose();
+        registration.dispose();
+        lensChanged.dispose();
+      },
+    };
 
     editor.focus();
   }
