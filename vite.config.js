@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, createReadStream } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join, extname } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -54,6 +56,39 @@ function vercelHeadersPreview() {
   };
 }
 
+// Self-host the Pyodide core (interpreter + stdlib) from the `pyodide` npm package at
+// /pyodide/v<version>/ — served from node_modules in dev, emitted into dist on build.
+// Optional packages (numpy, …) still come from jsDelivr via packageBaseUrl in the worker.
+const PYODIDE_CORE_FILES = ['pyodide.js', 'pyodide.asm.js', 'pyodide.asm.wasm', 'python_stdlib.zip', 'pyodide-lock.json'];
+const MIME = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.zip': 'application/zip', '.json': 'application/json' };
+
+export function pyodideCoreInfo() {
+  const dir = dirname(createRequire(import.meta.url).resolve('pyodide'));
+  const { version } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+  return { dir, version, base: `pyodide/v${version}/` };
+}
+
+function selfHostPyodide() {
+  const { dir, base } = pyodideCoreInfo();
+  return {
+    name: 'nexide-self-host-pyodide',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url || '').split('?')[0];
+        const file = path.startsWith(`/${base}`) ? path.slice(base.length + 1) : null;
+        if (!file || !PYODIDE_CORE_FILES.includes(file)) return next();
+        res.setHeader('Content-Type', MIME[extname(file)] || 'application/octet-stream');
+        createReadStream(join(dir, file)).pipe(res);
+      });
+    },
+    generateBundle() {
+      for (const file of PYODIDE_CORE_FILES) {
+        this.emitFile({ type: 'asset', fileName: base + file, source: readFileSync(join(dir, file)) });
+      }
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Make server-only variables (GEMINI_API_KEY…) visible to /api handlers in dev
@@ -63,7 +98,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), vercelApiDev(), vercelHeadersPreview()],
+    plugins: [react(), vercelApiDev(), vercelHeadersPreview(), selfHostPyodide()],
     worker: { format: 'es' },
     build: {
       // Monaco (lazy-loaded, self-hosted) is ~2.7 MB minified by design

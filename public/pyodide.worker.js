@@ -4,8 +4,12 @@
 // Runs Pyodide in a separate thread so infinite loops don't freeze the UI.
 // The main thread terminates and respawns this worker to stop a run.
 
+// Must match the `pyodide` npm package (checked by tests/pyodideVersion.test.js).
 const PYODIDE_VERSION = '0.28.3';
-const PYODIDE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+// Core runtime is self-hosted (vite.config.js copies it from node_modules/pyodide)…
+const PYODIDE_URL = `/pyodide/v${PYODIDE_VERSION}/`;
+// …optional packages (numpy, pandas, …) are fetched from the official distribution.
+const PACKAGE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 const MAX_STEPS = 10000;
 const FLUSH_MS = 50;
 
@@ -177,7 +181,7 @@ function lockdownWorkerScope(scope) {
 }
 
 const pyodideReady = (async () => {
-  const pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
+  const pyodide = await loadPyodide({ indexURL: PYODIDE_URL, packageBaseUrl: PACKAGE_BASE_URL });
   lockdownWorkerScope(self);
   // A distinct filename keeps the debugger's tracer away from these helpers
   pyodide.runPython(BOOTSTRAP, { filename: '<nexide>' });

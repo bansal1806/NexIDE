@@ -30,6 +30,8 @@ const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
 const pageErrors = [];
 page.on('pageerror', e => pageErrors.push(`pageerror: ${e.message}`));
+const pyodideCoreRequests = [];
+page.on('request', r => { if (/pyodide\.asm\.(js|wasm)|python_stdlib\.zip/.test(r.url())) pyodideCoreRequests.push(r.url()); });
 const cdnMonacoRequests = [];
 page.on('request', r => { if (/monaco-editor/.test(r.url()) && !r.url().startsWith(new URL(BASE).origin)) cdnMonacoRequests.push(r.url()); });
 page.on('console', m => { if (m.type() === 'error') pageErrors.push(`console: ${m.text()}`); });
@@ -259,6 +261,8 @@ try {
   await run();
   check('Python: Stop terminates infinite loop', await waitConsole(/stopped by user/, 5000));
 
+  const origin = new URL(BASE).origin;
+  check('Python: core runtime self-hosted (same origin)', pyodideCoreRequests.length > 0 && pyodideCoreRequests.every(u => u.startsWith(origin)), pyodideCoreRequests.find(u => !u.startsWith(origin)) || `${pyodideCoreRequests.length} core requests`);
   check('Editor: Monaco is self-hosted (no CDN requests)', cdnMonacoRequests.length === 0, cdnMonacoRequests[0] || '');
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));
