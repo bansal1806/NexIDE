@@ -19,7 +19,8 @@ import { useMonacoWorkspace } from './hooks/useMonacoWorkspace';
 
 // Services
 import { fetchFileContent } from './services/github';
-import { loadSettings, saveSettings, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
+import { loadSettings, saveSettings, pickSecrets, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
+import { getSecretStore } from './services/secretStore';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
 import { getLang, findNodeByPath, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
 
@@ -71,11 +72,39 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings);
   const settingsRef = useRef(settings);
   const cloudSyncedForRef = useRef(null);
+  const [secretsReady, setSecretsReady] = useState(false);
+
+  // Load API keys from the encrypted store. Nothing is persisted until this finishes,
+  // so legacy plaintext keys are re-saved encrypted before being dropped from localStorage.
+  useEffect(() => {
+    let cancelled = false;
+    getSecretStore().load()
+      .then(({ secrets, remembered }) => {
+        if (cancelled) return;
+        const found = Object.fromEntries(Object.entries(secrets).filter(([, v]) => typeof v === 'string' && v));
+        setSettings(prev => ({ ...prev, ...found, ...(remembered === false ? { rememberSecrets: false } : {}) }));
+      })
+      .catch(e => console.warn('Secure key storage unavailable; keys will not be saved:', e))
+      .finally(() => { if (!cancelled) setSecretsReady(true); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     settingsRef.current = settings;
-    saveSettings(settings);
-  }, [settings]);
+    if (!secretsReady) return;
+    const t = setTimeout(async () => {
+      // Encrypted copy first: plaintext (legacy) keys are only dropped from localStorage
+      // by saveSettings() once the encrypted copy is safely written.
+      try {
+        await getSecretStore().save(pickSecrets(settings), settings.rememberSecrets !== false);
+      } catch (e) {
+        console.warn('Could not store API keys securely:', e);
+        notify('error', 'This browser blocked secure storage — API keys will be forgotten when you close the tab.');
+      }
+      saveSettings(settings);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [settings, secretsReady, notify]);
 
   useEffect(() => {
     cloudSyncedForRef.current = null;

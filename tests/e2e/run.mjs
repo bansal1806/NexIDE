@@ -54,9 +54,11 @@ async function openTemplate(id) {
 }
 
 try {
-  await page.goto(BASE);
-  // A stored secret that user code must not be able to read
+  // Seed a legacy plaintext key (pre-encryption format) that user code must not be able to
+  // read. Done from /preview.html (same origin, no app running) so the app can't overwrite it.
+  await page.goto(new URL('/preview.html', BASE).href);
   await page.evaluate(() => localStorage.setItem('nexide:settings', JSON.stringify({ geminiApiKey: 'AIza-E2E-SECRET' })));
+  await page.goto(BASE);
 
   // ── Security headers (only when serving the production build via vite preview) ──
   if (server) {
@@ -78,6 +80,20 @@ try {
 
   // ── JavaScript ──
   await openTemplate('js');
+
+  // Legacy plaintext key (seeded above) is migrated to encrypted storage
+  await page.waitForFunction(() => !!localStorage.getItem('nexide:secrets'), null, { timeout: 5000 }).catch(() => {});
+  const stored = await page.evaluate(() => ({
+    plain: localStorage.getItem('nexide:settings') || '',
+    secret: localStorage.getItem('nexide:secrets') || '',
+  }));
+  await page.click('#btn-toggle-ai');
+  await page.waitForFunction(() => /your key/.test(document.querySelector('.ai-status')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
+  const aiStatus = await page.locator('.ai-status').innerText().catch(() => '');
+  await page.click('#btn-toggle-ai');
+  check('Secrets: plaintext key migrated to encrypted storage and still usable',
+    !stored.plain.includes('AIza-E2E-SECRET') && /"ct":/.test(stored.secret) && !stored.secret.includes('AIza-E2E-SECRET') && /your key/.test(aiStatus),
+    aiStatus);
   await setCode(`console.log('sync');\nsetTimeout(() => console.log('timer fired'), 50);\nawait new Promise(r => setTimeout(r, 10));\nconsole.log('awaited', {a: [1, 2]});`);
   await run();
   check('JS: sync + top-level await', await waitConsole(/awaited \{a: \[1, 2\]\}/));

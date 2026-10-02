@@ -102,7 +102,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
               <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
                 aistudio.google.com
               </a>
-              . Requests go directly from your browser to Google. The key is stored only in this browser and is never synced.
+              . Requests go directly from your browser to Google. The key is stored encrypted in this browser and is never synced.
             </p>
           </div>
 
@@ -129,7 +129,24 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
             </div>
             <p className="settings-hint">
               Needed only for private repos. Use a fine-grained token with read-only <em>Contents</em> access.
-              Stored only in this browser.
+              Stored encrypted in this browser.
+            </p>
+
+            <div className="settings-toggle-row">
+              <label className="settings-label" style={{ margin: 0 }} htmlFor="settings-remember-secrets">
+                Remember API keys on this device
+              </label>
+              <input
+                id="settings-remember-secrets"
+                type="checkbox"
+                checked={draft.rememberSecrets !== false}
+                onChange={e => update('rememberSecrets', e.target.checked)}
+                className="settings-checkbox"
+              />
+            </div>
+            <p className="settings-hint">
+              Off: keys are kept only until this tab is closed. Either way they're encrypted with a
+              non-extractable key and never leave this browser.
             </p>
           </div>
 

@@ -76,9 +76,27 @@ Items marked **[YOU]** need dashboard access and cannot be done from code.
   code lenses, preview, Python run/traceback/debug/Stop, no page errors; in-editor Ctrl+Enter runs the latest edit.
 - Production bundle contains no `service_role` JWT.
 
-## Next phase (not in this pass)
+# Phase 2 — Defense in depth
 
-- Full Content-Security-Policy (needs testing against Monaco/Pyodide CDNs).
-- Durable rate limiting (Upstash/Vercel KV) instead of per-instance memory.
-- Encrypt user API keys at rest in the browser, or move them to a server-side vault.
-- E2E tests (Playwright) for run/debug/save flows.
+- [x] **E2E in repo**: `npm run test:e2e` builds, serves the production bundle under the real
+  `vercel.json` headers, and drives local Edge/Chrome (playwright-core) — 27 checks.
+  Found & fixed: code lenses vanished after a layout change during a pending lens request.
+- [x] **Worker lockdown**: runner workers lose `indexedDB`, `caches`, `Worker`, `SharedWorker`,
+  `BroadcastChannel`, `navigator.storage` (removed from the whole prototype chain; also for Python's `js` module).
+- [x] **Content-Security-Policy**: strict app policy (scripts: self + jsDelivr only, no inline/eval,
+  restricted `connect-src`, no framing). Preview moved from `srcdoc` (inherits the app CSP) to a sandboxed
+  `/preview.html` host with its own permissive policy; workers get minimal per-file policies.
+  Monaco pinned to 0.57.0 (CDN default 0.55.1 bundled a vulnerable DOMPurify).
+- [x] **Durable rate limits**: Upstash / Vercel KV shared counters, per-minute + daily quota, memory fallback.
+- [x] **Encrypted API keys**: AES-GCM with a non-extractable key in IndexedDB; ciphertext in local/session
+  storage ("Remember on this device" toggle); legacy plaintext migrated on load.
+  Found & fixed: plaintext was stripped before the debounced encrypted save, so a quick close lost the key.
+
+**[YOU]** Optional: create an Upstash Redis (or Vercel KV) store and set `UPSTASH_REDIS_REST_URL` /
+`UPSTASH_REDIS_REST_TOKEN` in Vercel for shared limits.
+
+## Ideas for a later phase
+
+- Subresource integrity / self-hosting for Monaco and Pyodide (removes jsDelivr from the trust path).
+- Run E2E in CI (GitHub Actions with Chrome) on every PR.
+- Python package loading (`micropip`) UI; `input()` support via SharedArrayBuffer (needs COOP/COEP).
