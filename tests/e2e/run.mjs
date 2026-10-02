@@ -422,6 +422,39 @@ try {
     }
   }
 
+  // ── Offline (service worker; production build only) ──
+  if (server) {
+    const offlineContext = await browser.newContext({ viewport: { width: 1500, height: 900 } });
+    const off = await offlineContext.newPage();
+    const offConsole = (re, timeout) => off.waitForFunction(
+      (src) => new RegExp(src).test(document.querySelector('#console-panel')?.innerText || ''), re.source, { timeout }
+    ).then(() => true, () => false);
+    try {
+      await off.goto(BASE);
+      await off.evaluate(() => navigator.serviceWorker.ready);
+      await off.reload(); // now controlled by the service worker
+      // Warm the caches the way a user would: open the editor, run JS and Python once
+      await off.click('#welcome-template-py');
+      await off.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+      await off.waitForTimeout(500);
+      await off.click('#btn-run-code');
+      await offConsole(/✓ Completed/, 90000);
+
+      await offlineContext.setOffline(true);
+      await off.reload();
+      await off.click('#welcome-template-py');
+      await off.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+      await off.waitForTimeout(500);
+      await off.evaluate(() => window.monaco.editor.getEditors()[0].setValue('print("offline", sum(range(5)))'));
+      await off.click('#btn-run-code');
+      const pyOffline = await offConsole(/offline 10/, 60000);
+      const isolated = await off.evaluate(() => self.crossOriginIsolated === true);
+      check('Offline: app, editor and Python run without network (still isolated)', pyOffline && isolated, `py=${pyOffline} isolated=${isolated}`);
+    } finally {
+      await offlineContext.close();
+    }
+  }
+
   // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
   await openTemplate('py');
   await setCode('print("first")');

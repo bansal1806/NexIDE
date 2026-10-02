@@ -10,6 +10,13 @@ window.addEventListener('unhandledrejection', (e) => {
   if (e.reason?.type === 'cancelation') e.preventDefault();
 });
 
+// Offline support (production builds only; dev uses Vite's own module server)
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => console.warn('Offline support unavailable:', err));
+  });
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>

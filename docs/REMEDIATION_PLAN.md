@@ -137,8 +137,19 @@ Safari lacks `credentialless`, so there the page isn't isolated and input falls 
 - [x] **Input box per file**, remembered across reloads (50 files × 10 KB cap).
 - Verification: lint clean · unit 70/70 · E2E 45/45 under production headers.
 
+## Phase 6 — Cross-file debugging, offline support (branch `phase-6`)
+
+- [x] **Time travel across files** (JS and Python): imported workspace modules are recorded too; stepping into
+  another file opens it and highlights the line; timeline shows `file · Line N`.
+  Found & fixed: breakpoints were keyed by line only, so with multi-file programs a breakpoint matched that line
+  in *every* file — now keyed by `file:line`.
+- [x] **Offline**: `public/sw.js` — network-first navigations with an offline app shell, cache-first for hashed
+  `/assets` and the versioned Pyodide core, stale-while-revalidate for other same-origin files; never `/api`.
+  Cached responses keep COOP/COEP, so the page stays cross-origin isolated offline. Production builds only.
+- Verification: lint clean · unit 71/71 · E2E 48/48 (incl. going offline and running Python).
+
 ## Ideas for a later phase
 
-- Python debugger for imported workspace modules (currently traces the entry file).
 - Pin npm package versions per workspace (a small lockfile) for reproducible runs.
-- Offline support (service worker caching the app shell, Monaco and the Pyodide core).
+- Cache npm packages from esm.sh for offline use (opt-in).
+- Split `App.jsx` (~950 lines) into workspace / runner / debugger modules.
