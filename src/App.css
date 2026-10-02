@@ -2210,3 +2210,10 @@
     gap: 20px !important;
   }
 }
+
+/* Keyboard focus (tree items, editor tabs) */
+.file-tree-item:focus-visible,
+.tab:focus-visible {
+  outline: 1px solid var(--accent-cyan);
+  outline-offset: -1px;
+}

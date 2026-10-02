@@ -37,7 +37,10 @@ function FileIcon({ name, kind }) {
   return <File size={13} style={{ color, flexShrink: 0 }} />;
 }
 
-function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMode, owner, repo, branch, onFetchContent }) {
+// Visible tree items in document order (collapsed folders' children aren't rendered)
+const visibleItems = (el) => [...el.closest('[role="tree"]').querySelectorAll('[role="treeitem"]')];
+
+function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMode, owner, repo, branch, onFetchContent, tabStop, onFocusItem }) {
   const [expanded, setExpanded] = useState(depth < 1);
   const isDir  = node.kind === 'directory';
   const isActive = node.path === activeFilePath;
@@ -51,16 +54,53 @@ function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMo
     onFileClick(node);
   }, [isDir, node, onFileClick, githubMode, onFetchContent]);
 
+  // WAI-ARIA tree keyboard model
+  const handleKeyDown = (e) => {
+    const items = visibleItems(e.currentTarget);
+    const index = items.indexOf(e.currentTarget);
+    const focusAt = (i) => items[Math.max(0, Math.min(items.length - 1, i))]?.focus();
+    switch (e.key) {
+      case 'ArrowDown': e.preventDefault(); focusAt(index + 1); break;
+      case 'ArrowUp':   e.preventDefault(); focusAt(index - 1); break;
+      case 'Home':      e.preventDefault(); focusAt(0); break;
+      case 'End':       e.preventDefault(); focusAt(items.length - 1); break;
+      case 'ArrowRight':
+        e.preventDefault();
+        if (isDir && !expanded) setExpanded(true);
+        else if (isDir && node.children.length) focusAt(index + 1); // first child
+        break;
+      case 'ArrowLeft': {
+        e.preventDefault();
+        if (isDir && expanded) { setExpanded(false); break; }
+        // Move to the parent folder: nearest previous item one level up
+        for (let i = index - 1; i >= 0; i--) {
+          if (Number(items[i].getAttribute('aria-level')) === depth) { items[i].focus(); break; }
+        }
+        break;
+      }
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        handleClick();
+        break;
+    }
+  };
+
   return (
-    <div>
+    <div role="none">
       <div
         className={`file-tree-item ${isActive ? 'active' : ''}`}
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={handleClick}
-        role="button"
-        tabIndex={0}
-        onKeyDown={e => e.key === 'Enter' && handleClick()}
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-expanded={isDir ? expanded : undefined}
+        aria-selected={isActive}
+        tabIndex={node.path === tabStop ? 0 : -1}
+        onFocus={() => onFocusItem(node.path)}
+        onKeyDown={handleKeyDown}
         title={node.path}
+        data-path={node.path}
       >
         {isDir
           ? (expanded
@@ -75,6 +115,7 @@ function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMo
       {isDir && expanded && node.children.length > 0 && (
         <AnimatePresence initial={false}>
           <motion.div
+            role="group"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -94,6 +135,8 @@ function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMo
                 repo={repo}
                 branch={branch}
                 onFetchContent={onFetchContent}
+                tabStop={tabStop}
+                onFocusItem={onFocusItem}
               />
             ))}
           </motion.div>
@@ -110,6 +153,9 @@ export const FileExplorer = memo(function FileExplorer({
 }) {
   const hasTree = fileTree && fileTree.length > 0;
   const [showCloudProjects, setShowCloudProjects] = useState(false);
+  // Roving tabindex: exactly one tree item is in the Tab order (the last focused, else the first)
+  const [focusPath, setFocusPath] = useState(null);
+  const tabStop = focusPath ?? fileTree?.[0]?.path;
 
   return (
     <div className="file-explorer" id="file-explorer">
@@ -197,6 +243,8 @@ export const FileExplorer = memo(function FileExplorer({
                 repo={githubInfo?.repo}
                 branch={githubInfo?.branch}
                 onFetchContent={onFetchContent}
+                tabStop={tabStop}
+                onFocusItem={setFocusPath}
               />
             ))}
           </div>
