@@ -30,6 +30,8 @@ const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
 const pageErrors = [];
 page.on('pageerror', e => pageErrors.push(`pageerror: ${e.message}`));
+const cdnMonacoRequests = [];
+page.on('request', r => { if (/monaco-editor/.test(r.url()) && !r.url().startsWith(new URL(BASE).origin)) cdnMonacoRequests.push(r.url()); });
 page.on('console', m => { if (m.type() === 'error') pageErrors.push(`console: ${m.text()}`); });
 // CSP violations anywhere in the page (workers report through console errors)
 await page.addInitScript(() => {
@@ -70,8 +72,8 @@ try {
       const js = entry ? await (await fetch(entry)).text() : '';
       return js.match(/assets\/jsRunner\.worker-[\w-]+\.js/)?.[0] || null;
     }, BASE);
-    check('CSP: app is strict (no unsafe-inline/eval scripts, no framing)',
-      /script-src 'self' https:\/\/cdn\.jsdelivr\.net;/.test(app) && !/script-src[^;]*unsafe/.test(app) && /frame-ancestors 'none'/.test(app));
+    check('CSP: app is strict (same-origin scripts only, no CDN, no framing)',
+      /script-src 'self';/.test(app) && !/jsdelivr/.test(app) && /frame-ancestors 'none'/.test(app));
     check('CSP: preview host is permissive but frameable only by the app',
       /'unsafe-inline'/.test(await csp('/preview.html')) && /frame-ancestors 'self'/.test(await csp('/preview.html')));
     check('CSP: runner worker allows eval only for itself',
@@ -176,6 +178,15 @@ try {
   await page.selectOption('#language-select', 'typescript');
   await run();
   check('TypeScript: transpiled and run', await waitConsole(/ts 42/));
+
+  // The bundled TS language worker runs under the strict CSP: a type error yields a marker
+  await setCode(`const n: number = "not a number";`);
+  const tsMarker = await page.waitForFunction(
+    // main.js switched to TypeScript: the TS service flags the annotation either way
+    () => window.monaco.editor.getModelMarkers({}).length > 0,
+    null, { timeout: 20000 }
+  ).then(() => true, () => false);
+  check('Editor: TypeScript diagnostics from self-hosted Monaco worker', tsMarker);
   await page.selectOption('#language-select', 'javascript');
 
   // ── Live preview ──
@@ -224,6 +235,7 @@ try {
   await run();
   check('Python: Stop terminates infinite loop', await waitConsole(/stopped by user/, 5000));
 
+  check('Editor: Monaco is self-hosted (no CDN requests)', cdnMonacoRequests.length === 0, cdnMonacoRequests[0] || '');
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));
 } finally {

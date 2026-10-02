@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react';
-import { useMonaco } from '@monaco-editor/react';
+import { useEffect, useRef, useState } from 'react';
 import { getLang } from '../utils/files';
 
 const uriFor = (monaco, path) => monaco.Uri.parse(`file:///${path}`);
@@ -12,7 +11,16 @@ const uriFor = (monaco, path) => monaco.Uri.parse(`file:///${path}`);
  * disposed — never the model the editor is currently showing.
  */
 export function useMonacoWorkspace(files, onModelChanged) {
-  const monaco = useMonaco();
+  // Load the (large, lazily bundled) editor only once there is a workspace to model
+  const [monaco, setMonaco] = useState(null);
+  const needMonaco = !monaco && files?.length > 0;
+  useEffect(() => {
+    if (!needMonaco) return;
+    let cancelled = false;
+    import('../lib/monaco').then(m => { if (!cancelled) setMonaco(m.monaco); });
+    return () => { cancelled = true; };
+  }, [needMonaco]);
+
   const ownedRef = useRef(new Map()); // uri string -> model
 
   useEffect(() => {

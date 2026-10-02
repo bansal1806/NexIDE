@@ -66,6 +66,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), vercelApiDev(), vercelHeadersPreview()],
     worker: { format: 'es' },
     build: {
+      // Monaco (lazy-loaded, self-hosted) is ~2.7 MB minified by design
+      chunkSizeWarningLimit: 3000,
       rolldownOptions: {
         output: {
           codeSplitting: {
