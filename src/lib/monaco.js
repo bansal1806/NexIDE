@@ -1,9 +1,30 @@
+// Bundled (self-hosted) Monaco. Loading it from a CDN would give that CDN script access to
+// the app's origin — including the signed-in session — so the editor ships with the app.
+// Only imported from lazily loaded code (Editor, workspace models) to keep startup small.
+import * as monaco from 'monaco-editor';
 import { loader } from '@monaco-editor/react';
+import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
+import JsonWorker from 'monaco-editor/language/json/json.worker?worker';
+import CssWorker from 'monaco-editor/language/css/css.worker?worker';
+import HtmlWorker from 'monaco-editor/language/html/html.worker?worker';
+import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 
-// Pin the Monaco build loaded from the CDN. @monaco-editor/loader's default (0.55.1)
-// bundles a DOMPurify version with known XSS advisories; 0.57.0 ships 3.4.15.
-// Keep this origin in sync with the CSP in vercel.json.
-export const MONACO_VERSION = '0.57.0';
-export const MONACO_CDN = `https://cdn.jsdelivr.net/npm/monaco-editor@${MONACO_VERSION}/min/vs`;
+self.MonacoEnvironment = {
+  getWorker(_workerId, label) {
+    switch (label) {
+      case 'json': return new JsonWorker();
+      case 'css': case 'scss': case 'less': return new CssWorker();
+      case 'html': case 'handlebars': case 'razor': return new HtmlWorker();
+      case 'typescript': case 'javascript': return new TsWorker();
+      default: return new EditorWorker();
+    }
+  },
+};
 
-loader.config({ paths: { vs: MONACO_CDN } });
+// Make @monaco-editor/react use this instance instead of fetching one from jsDelivr
+loader.config({ monaco });
+
+// Handy in devtools; also used by the E2E suite to drive the editor
+window.monaco = monaco;
+
+export { monaco };

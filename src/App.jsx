@@ -22,11 +22,12 @@ import { fetchFileContent } from './services/github';
 import { loadSettings, saveSettings, pickSecrets, syncSettingsWithCloud, persistSettingsToCloud } from './services/settings';
 import { getSecretStore } from './services/secretStore';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
+import { stdinLines } from './runtime/output';
 import { getLang, findNodeByPath, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
 
 // Components
 import { FileExplorer }   from './components/FileExplorer';
-import { Editor, STARTERS } from './components/Editor';
+import { STARTERS }       from './components/starters';
 import { ConsoleOutput }  from './components/ConsoleOutput';
 import { AIChat }         from './components/AIChat';
 import { StatusBar }      from './components/StatusBar';
@@ -38,7 +39,8 @@ import { WelcomeScreen }  from './components/WelcomeScreen';
 import { CommandPalette } from './components/CommandPalette';
 import { AuthModal }      from './components/AuthModal';
 
-// Heavy panels (d3, sucrase) load on demand
+// Heavy pieces (Monaco, d3, sucrase) load on demand
+const Editor      = lazy(() => import('./components/Editor'));
 const CodeMap     = lazy(() => import('./components/CodeMap'));
 const LivePreview = lazy(() => import('./components/LivePreview'));
 
@@ -220,7 +222,18 @@ export default function App() {
 
   // ── Cursor / editor ──────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [stdinText, setStdinText] = useState('');
   const editorRef = useRef(null);
+
+  // The active tab with the editor's *live* text. React state lags the editor by a render,
+  // so a shortcut pressed right after typing (Ctrl+Enter / Ctrl+S) must read the model.
+  const liveActiveTab = useCallback(() => {
+    const tab = activeTabRef.current;
+    const model = editorRef.current?.getModel?.();
+    if (!tab || !model || model.uri.path !== `/${tab.path}`) return tab;
+    const content = model.getValue();
+    return content === tab.content ? tab : { ...tab, content };
+  }, []);
 
   const confirmDiscard = useCallback((action) => (
     !tabsRef.current.some(t => t.dirty) ||
@@ -342,8 +355,15 @@ export default function App() {
         if (!silent) notify('info', 'Open a folder or a cloud project to save files.');
         return false;
       }
-      // Only clear dirty if nothing changed while saving
-      setTabs(prev => prev.map(t => t.id === tab.id && t.content === tab.content ? { ...t, dirty: false } : t));
+      // Only clear dirty if nothing changed while saving. For the visible tab the editor model
+      // is the source of truth (state may still be catching up with the last keystrokes).
+      const model = editorRef.current?.getModel?.();
+      const liveText = model && model.uri.path === `/${tab.path}` ? model.getValue() : null;
+      setTabs(prev => prev.map(t => {
+        if (t.id !== tab.id) return t;
+        const current = liveText ?? t.content;
+        return current === tab.content ? { ...t, content: tab.content, dirty: false } : t;
+      }));
       return true;
     } catch (e) {
       if (e?.name === 'AbortError') return false; // user cancelled a picker
@@ -353,7 +373,7 @@ export default function App() {
     }
   }, [cloudMode, activeProjectId, githubMode, githubTree, fs, notify, refreshCloudTree]);
 
-  const saveFile = useCallback(() => saveTab(activeTabRef.current), [saveTab]);
+  const saveFile = useCallback(() => saveTab(liveActiveTab()), [saveTab, liveActiveTab]);
 
   // Auto Save: 1s after the last edit, for files that have a real backing store
   useEffect(() => {
@@ -379,15 +399,16 @@ export default function App() {
   }, []);
 
   // ── Run / debug ──────────────────────────────────────────────────
-  const runTab = useCallback((tab, options) => {
+  const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
+    const opts = { ...options, stdin: stdinLines(stdinText) };
     return tab.lang === 'python'
-      ? runPython(tab.content, options)
-      : runJs(tab.content, tab.lang, options);
-  }, [runPython, runJs]);
+      ? runPython(tab.content, opts)
+      : runJs(tab.content, tab.lang, opts);
+  }, [runPython, runJs, stdinText]);
 
-  const runCode = useCallback(() => runTab(activeTabRef.current), [runTab]);
+  const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 
   const stopRun = useCallback(() => {
     stopPython();
@@ -395,7 +416,7 @@ export default function App() {
   }, [stopPython, stopJs]);
 
   const runDebug = useCallback(async () => {
-    const tab = activeTabRef.current;
+    const tab = liveActiveTab();
     if (!tab) return;
     if (!RUNNABLE.has(tab.lang)) {
       notify('info', 'The debugger supports JavaScript, TypeScript and Python.');
@@ -405,7 +426,7 @@ export default function App() {
     startDebug();
     await runTab(tab, { debug: true, onDebugSteps: addSnapshots });
     focusFirstBreakpoint();
-  }, [runTab, startDebug, addSnapshots, focusFirstBreakpoint, notify]);
+  }, [runTab, liveActiveTab, startDebug, addSnapshots, focusFirstBreakpoint, notify]);
 
   const exitDebug = useCallback(() => {
     clearSnapshots();
@@ -688,6 +709,7 @@ export default function App() {
               )}
               {activeTab && (
                 <div className="editor-area">
+                  <Suspense fallback={<div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading editor…</div>}>
                   <Editor
                     code={activeTab.content}
                     path={activeTab.path}
@@ -708,6 +730,7 @@ export default function App() {
                     minimap={settings.minimap}
                     fontLigatures={settings.fontLigatures}
                   />
+                  </Suspense>
                 </div>
               )}
             </div>
@@ -734,7 +757,7 @@ export default function App() {
                     onClose={() => setBottomPanel(null)}
                   />
                 )}
-                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} />}
+                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} stdin={stdinText} onStdinChange={setStdinText} />}
               </div>
             </div>
           )}

@@ -28,6 +28,15 @@ function onLog(type, text) {
 self.onmessage = async (event) => {
   const { type, id, code, language, debug, maxSteps } = event.data || {};
   if (type !== 'run') return;
+
+  // Program input for prompt(): one line per call, echoed like a terminal; null at EOF
+  const stdinLines = Array.isArray(event.data.stdin) ? event.data.stdin.slice() : [];
+  self.prompt = (message = '') => {
+    const value = stdinLines.length ? String(stdinLines.shift()) : null;
+    onLog('log', `${message}${value ?? '(no input)'}`);
+    return value;
+  };
+
   runId = id;
   const start = performance.now();
 

@@ -38,7 +38,7 @@ export function usePython() {
 
     if (data.type === 'output') {
       // The worker sends whole lines (blank lines from print() are kept)
-      addLines(data.chunks.map(c => makeLine(c.stream === 'stderr' ? 'warn' : 'log', c.text)));
+      addLines(data.chunks.map(c => makeLine(c.stream === 'stderr' ? 'warn' : c.stream === 'system' ? 'system' : 'log', c.text)));
     } else if (data.type === 'steps') {
       run.onDebugSteps?.(data.steps);
     } else if (data.type === 'done') {
@@ -89,7 +89,7 @@ export function usePython() {
 
     return new Promise((resolve) => {
       runRef.current = { id, resolve, onDebugSteps: options.onDebugSteps, start: performance.now() };
-      worker.postMessage({ type: 'run', id, code, debug: !!options.debug });
+      worker.postMessage({ type: 'run', id, code, debug: !!options.debug, stdin: options.stdin || [] });
     });
   }, [spawn, finish, isReady]);
 
