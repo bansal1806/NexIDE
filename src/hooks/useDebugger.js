@@ -18,9 +18,13 @@ export function useDebugger() {
   const [isPlaying, setIsPlaying]       = useState(false);
   const [playSpeed, setPlaySpeed]       = useState(1);   // 0.5 | 1 | 2 | 4
   const playTimerRef                    = useRef(null);
+  const snapshotsRef                    = useRef([]);
+  const breakpointsRef                  = useRef(new Set());
 
   // ── Watch expressions ────────────────────────────────────────────
   const [watchList, setWatchList]       = useState([]);   // string[]
+
+  useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
 
   // ── Derived: current snapshot ────────────────────────────────────
   const currentSnapshot = useMemo(() => {
@@ -107,6 +111,7 @@ export function useDebugger() {
   // ── Actions ──────────────────────────────────────────────────────
 
   const startDebug = useCallback(() => {
+    snapshotsRef.current = [];
     setSnapshots([]);
     setCurrentIndex(-1);
     setIsDebugging(true);
@@ -122,29 +127,32 @@ export function useDebugger() {
     }
   }, []);
 
-  const addSnapshot = useCallback((snapshot) => {
-    setSnapshots(prev => {
-      const enriched = {
-        ...snapshot,
-        timestamp: Date.now(),
-        callStack: snapshot.callStack || [],
-      };
-      const next = [...prev, enriched];
-      setCurrentIndex(curr => curr === prev.length - 1 || curr === -1
-        ? next.length - 1
-        : curr
-      );
-      return next;
-    });
+  // Append a batch of snapshots; the playhead follows the end while it is at the end ('live')
+  const addSnapshots = useCallback((batch) => {
+    if (!batch?.length) return;
+    const now = Date.now();
+    const enriched = batch.map(s => ({ ...s, timestamp: now, callStack: s.callStack || [] }));
+    const prevLength = snapshotsRef.current.length;
+    const next = snapshotsRef.current.concat(enriched);
+    snapshotsRef.current = next;
+    setSnapshots(next);
+    setCurrentIndex(curr => (curr === prevLength - 1 || curr === -1) ? next.length - 1 : curr);
+  }, []);
+
+  const addSnapshot = useCallback((snapshot) => addSnapshots([snapshot]), [addSnapshots]);
+
+  // After a recording finishes: park the playhead on the first breakpoint hit, if any
+  const focusFirstBreakpoint = useCallback(() => {
+    const bps = breakpointsRef.current;
+    if (bps.size === 0) return false;
+    const idx = snapshotsRef.current.findIndex(s => bps.has(s.line));
+    if (idx === -1) return false;
+    setCurrentIndex(idx);
+    return true;
   }, []);
 
   const setPlayhead = useCallback((index) => {
-    setSnapshots(snaps => {
-      if (index >= -1 && index < snaps.length) {
-        setCurrentIndex(index);
-      }
-      return snaps;
-    });
+    if (index >= -1 && index < snapshotsRef.current.length) setCurrentIndex(index);
   }, []);
 
   const stepForward = useCallback(() => {
@@ -167,6 +175,7 @@ export function useDebugger() {
   }, [snapshots.length]);
 
   const clearSnapshots = useCallback(() => {
+    snapshotsRef.current = [];
     setSnapshots([]);
     setCurrentIndex(-1);
     setIsPlaying(false);
@@ -229,11 +238,15 @@ export function useDebugger() {
       const interval = Math.round(400 / playSpeed);
       playTimerRef.current = setInterval(() => {
         setCurrentIndex(prev => {
-          if (prev >= snapshots.length - 1) {
+          const snaps = snapshotsRef.current;
+          if (prev >= snaps.length - 1) {
             setIsPlaying(false);
             return prev;
           }
-          return prev + 1;
+          const next = prev + 1;
+          // Pause when playback reaches a breakpoint line
+          if (breakpointsRef.current.has(snaps[next]?.line)) setIsPlaying(false);
+          return next;
         });
       }, interval);
     }
@@ -276,6 +289,8 @@ export function useDebugger() {
     startDebug,
     endDebug,
     addSnapshot,
+    addSnapshots,
+    focusFirstBreakpoint,
     setPlayhead,
     stepForward,
     stepBackward,

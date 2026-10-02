@@ -1,89 +1,204 @@
 // public/pyodide.worker.js
-/* global importScripts, loadPyodide */
+/* global loadPyodide */
 
-// Runs Pyodide in a separate thread so infinite loops don't freeze the UI
+// Runs Pyodide in a separate thread so infinite loops don't freeze the UI.
+// The main thread terminates and respawns this worker to stop a run.
 
-importScripts('https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js');
+const PYODIDE_VERSION = '0.28.3';
+const PYODIDE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+const MAX_STEPS = 10000;
+const FLUSH_MS = 50;
 
-let pyodideReadyPromise;
+importScripts(`${PYODIDE_URL}pyodide.js`);
 
-async function loadPyodideAndPackages() {
-  self.pyodide = await loadPyodide({
-    indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/'
-  });
-  
-  // Set up Python standard output/error redirection
-  self.pyodide.runPython(`
-import sys, io
+let currentRunId = null;
+let outBuffer = [];
+let stepBuffer = [];
+let flushTimer = null;
 
-class JSWriter(io.StringIO):
-    def __init__(self, stream_type):
-        super().__init__()
-        self.stream_type = stream_type
-        
-    def write(self, s):
-        if not s: return
-        import js
-        js.postMessage(js.Object.fromEntries([
-            ('__python_output', True),
-            ('stream', self.stream_type),
-            ('text', s)
-        ]))
-
-sys.stdout = JSWriter('stdout')
-sys.stderr = JSWriter('stderr')
-
-def __debug_trace(frame, event, arg):
-    if event != 'line':
-        return __debug_trace
-    
-    # Only trace code without a filename (the user's code in runPython)
-    if frame.f_code.co_filename != '<exec>':
-        return __debug_trace
-
-    # Capture locals (shallow copy to avoid circular refs/bloat)
-    l = {k: str(v) for k, v in frame.f_locals.items() if not k.startswith('__')}
-    
-    import js
-    js.postMessage(js.Object.fromEntries([
-        ('__debug_step', True),
-        ('line', frame.f_lineno),
-        ('locals', js.Object.fromEntries(l.items()))
-    ]))
-    return __debug_trace
-
-def start_debug():
-    sys.settrace(__debug_trace)
-
-def stop_debug():
-    sys.settrace(None)
-`);
+function flush() {
+  flushTimer = null;
+  if (outBuffer.length) {
+    self.postMessage({ type: 'output', runId: currentRunId, chunks: outBuffer });
+    outBuffer = [];
+  }
+  if (stepBuffer.length) {
+    self.postMessage({ type: 'steps', runId: currentRunId, steps: stepBuffer });
+    stepBuffer = [];
+  }
 }
 
-pyodideReadyPromise = loadPyodideAndPackages();
+function scheduleFlush() {
+  if (!flushTimer) flushTimer = setTimeout(flush, FLUSH_MS);
+}
+
+// print() issues several write() calls per line; buffer per stream and emit whole lines
+const partial = { stdout: '', stderr: '' };
+
+function flushPartialLines() {
+  for (const stream of Object.keys(partial)) {
+    if (partial[stream]) outBuffer.push({ stream, text: partial[stream] });
+    partial[stream] = '';
+  }
+}
+
+// Called from Python (plain strings cross the boundary without proxies)
+self.nexideOutput = (stream, text) => {
+  const lines = (partial[stream] + text).split('\n');
+  partial[stream] = lines.pop();
+  for (const line of lines) outBuffer.push({ stream, text: line });
+  if (partial[stream].length > 10_000) flushPartialLines();
+  scheduleFlush();
+};
+
+self.nexideStep = (line, localsJson, stackJson) => {
+  stepBuffer.push({ line, state: JSON.parse(localsJson), callStack: JSON.parse(stackJson) });
+  if (stepBuffer.length >= 250) flush(); else scheduleFlush();
+};
+
+const BOOTSTRAP = `
+import sys, io, json, types, js
+
+class _NxWriter(io.TextIOBase):
+    def __init__(self, stream):
+        self._stream = stream
+    def writable(self):
+        return True
+    def write(self, s):
+        if s:
+            js.nexideOutput(self._stream, s)
+        return len(s)
+    def flush(self):
+        pass
+
+sys.stdout = _NxWriter('stdout')
+sys.stderr = _NxWriter('stderr')
+
+_nx_steps = 0
+_NX_MAX = ${MAX_STEPS}
+
+def _nx_json(v, depth=0):
+    if v is None or isinstance(v, (bool, int, float)):
+        if isinstance(v, float) and (v != v or v in (float('inf'), float('-inf'))):
+            return repr(v)
+        if isinstance(v, int) and not isinstance(v, bool) and abs(v) > 2**53:
+            return repr(v)
+        return v
+    if isinstance(v, str):
+        return v if len(v) <= 500 else v[:500] + '…'
+    if depth < 3:
+        if isinstance(v, (list, tuple, set, frozenset)):
+            return [_nx_json(x, depth + 1) for x in list(v)[:100]]
+        if isinstance(v, dict):
+            return {str(k): _nx_json(x, depth + 1) for k, x in list(v.items())[:100]}
+    try:
+        r = repr(v)
+    except Exception:
+        r = '<unrepresentable>'
+    return r if len(r) <= 500 else r[:500] + '…'
+
+def _nx_trace(frame, event, arg):
+    global _nx_steps
+    if frame.f_code.co_filename != '<exec>':
+        return None
+    if event == 'line':
+        _nx_steps += 1
+        if _nx_steps > _NX_MAX:
+            sys.settrace(None)
+            raise RuntimeError(f'Debugger: exceeded {_NX_MAX} steps — possible infinite loop.')
+        local_vars = {}
+        for k, v in frame.f_locals.items():
+            if k.startswith('__') or isinstance(v, types.ModuleType):
+                continue
+            local_vars[k] = _nx_json(v)
+        stack = []
+        f = frame
+        while f is not None:
+            if f.f_code.co_filename == '<exec>':
+                name = f.f_code.co_name
+                stack.append({'name': '(module)' if name == '<module>' else name, 'line': f.f_lineno})
+            f = f.f_back
+        stack.reverse()
+        js.nexideStep(frame.f_lineno, json.dumps(local_vars), json.dumps(stack))
+    return _nx_trace
+
+def _nx_start(debug):
+    global _nx_steps
+    _nx_steps = 0
+    sys.settrace(_nx_trace if debug else None)
+
+def _nx_stop():
+    sys.settrace(None)
+
+def _nx_short_repr(v):
+    try:
+        r = repr(v)
+    except Exception:
+        r = '<unrepresentable>'
+    return r if len(r) <= 2000 else r[:2000] + '…'
+
+async def _nx_run(source, ns, debug):
+    """Run user code; returns [ok, payload] where payload is the last-expression repr or a traceback."""
+    from pyodide.code import eval_code_async
+    import traceback
+    _nx_start(debug)
+    try:
+        value = await eval_code_async(source, ns, filename='<exec>')
+        return [True, None if value is None else _nx_short_repr(value)]
+    except BaseException as e:
+        _nx_stop()
+        tb = e.__traceback__
+        # Skip Pyodide's internal frames: start at the first frame of the user's code
+        while tb is not None and tb.tb_frame.f_code.co_filename != '<exec>':
+            tb = tb.tb_next
+        return [False, ''.join(traceback.format_exception(type(e), e, tb)).rstrip()]
+    finally:
+        _nx_stop()
+`;
+
+const pyodideReady = (async () => {
+  const pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
+  // A distinct filename keeps the debugger's tracer away from these helpers
+  pyodide.runPython(BOOTSTRAP, { filename: '<nexide>' });
+  return {
+    newDict: pyodide.globals.get('dict'),
+    nxRun: pyodide.globals.get('_nx_run'),
+  };
+})();
+
+pyodideReady.then(
+  () => self.postMessage({ type: 'ready' }),
+  (err) => self.postMessage({ type: 'load-error', error: String(err?.message || err) }),
+);
 
 self.onmessage = async (event) => {
-  const { id, code, debug = false } = event.data;
-  if (!code) return;
+  const { type, id, code, debug = false } = event.data || {};
+  if (type !== 'run') return;
+  currentRunId = id;
 
+  let py;
   try {
-    await pyodideReadyPromise;
-    
-    if (debug) {
-      self.pyodide.runPython('start_debug()');
-    } else {
-      self.pyodide.runPython('stop_debug()');
-    }
-
-    // execute
-    const result = await self.pyodide.runPythonAsync(code);
-
-    if (debug) {
-      self.pyodide.runPython('stop_debug()');
-    }
-
-    self.postMessage({ id, __python_done: true, results: String(result), error: null });
-  } catch (error) {
-    self.postMessage({ id, __python_done: true, error: error.message });
+    py = await pyodideReady;
+  } catch (err) {
+    self.postMessage({ type: 'done', runId: id, ok: false, error: `Failed to load Python: ${err?.message || err}` });
+    return;
   }
+
+  // Fresh namespace per run: no state leaks between runs, and helper names stay hidden
+  const namespace = py.newDict();
+  namespace.set('__name__', '__main__');
+  let ok = false;
+  let payload = null;
+  try {
+    const res = await py.nxRun(code, namespace, debug);
+    [ok, payload] = res.toJs();
+    res.destroy();
+  } catch (err) {
+    payload = String(err?.message || err);
+  } finally {
+    namespace.destroy();
+  }
+  flushPartialLines();
+  flush();
+  self.postMessage({ type: 'done', runId: id, ok, error: ok ? null : payload, result: ok ? payload : null });
 };
