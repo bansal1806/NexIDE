@@ -22,7 +22,7 @@
 
   --text-primary:  #e2e4ef;
   --text-secondary:#8b8fa8;
-  --text-muted:    #565870;
+  --text-muted:    #868ba4; /* ≥4.5:1 on every surface (WCAG AA) */
   --text-heading:  #f0f1fa;
 
   --accent-cyan:   #00d4ff;
@@ -83,6 +83,7 @@ html, body {
 
 /* Themes */
 [data-theme="aurora"] {
+  --text-muted:    #8a84a8;
   --bg-base:       #0a0b12;
   --bg-surface:    #12101e;
   --bg-elevated:   #181526;
@@ -96,6 +97,7 @@ html, body {
 }
 
 [data-theme="crimson"] {
+  --text-muted:    #a88a8a;
   --bg-base:       #120a0a;
   --bg-surface:    #1c0f0f;
   --bg-elevated:   #261515;
@@ -109,6 +111,7 @@ html, body {
 }
 
 [data-theme="vs-dark"] {
+  --text-muted:    #9d9d9d;
   --bg-base:       #1e1e1e;
   --bg-surface:    #252526;
   --bg-elevated:   #2d2d30;

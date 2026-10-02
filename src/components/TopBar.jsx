@@ -40,7 +40,7 @@ export const TopBar = memo(function TopBar({
     <header className="topbar" role="banner" id="topbar">
       <div className="topbar-logo">
         <div className="topbar-logo-icon" aria-hidden="true">⚡</div>
-        <span className="topbar-logo-text">NexIDE</span>
+        <h1 className="topbar-logo-text" style={{ margin: 0 }}>NexIDE</h1>
       </div>
 
       <div className="topbar-divider" aria-hidden="true" />

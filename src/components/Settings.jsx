@@ -51,8 +51,8 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
             <div className="settings-section-title">
               <Eye size={12} /> Appearance
             </div>
-            <label className="settings-label">Theme</label>
-            <div className="theme-selector">
+            <div className="settings-label" id="settings-theme-label">Theme</div>
+            <div className="theme-selector" role="radiogroup" aria-labelledby="settings-theme-label">
               {THEMES.map(t => (
                 <div
                   key={t.id}
@@ -81,7 +81,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
                 Built-in AI quota exhausted. Enter your personal Gemini API key below to continue using AI features.
               </div>
             )}
-            <label className="settings-label">Gemini API Key {isExhausted && <span style={{ color: '#ef4444' }}>(Required)</span>}</label>
+            <label className="settings-label" htmlFor="settings-gemini-key">Gemini API Key {isExhausted && <span style={{ color: '#ef4444' }}>(Required)</span>}</label>
             <div className="settings-input-row">
               <input
                 id="settings-gemini-key"
@@ -111,7 +111,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
             <div className="settings-section-title">
               <Github size={12} /> GitHub
             </div>
-            <label className="settings-label">Personal Access Token (optional)</label>
+            <label className="settings-label" htmlFor="settings-github-token">Personal Access Token (optional)</label>
             <div className="settings-input-row">
               <input
                 id="settings-github-token"
@@ -156,7 +156,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
               <Type size={12} /> Editor
             </div>
 
-            <label className="settings-label">Font Size: {draft.fontSize}px</label>
+            <label className="settings-label" htmlFor="settings-font-size">Font Size: {draft.fontSize}px</label>
             <input
               id="settings-font-size"
               type="range" min={10} max={24} step={1}
@@ -165,7 +165,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
               className="settings-range"
             />
 
-            <label className="settings-label">Tab Size</label>
+            <label className="settings-label" htmlFor="settings-tab-size">Tab Size</label>
             <select
               id="settings-tab-size"
               className="settings-select"
@@ -177,7 +177,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
               <option value={8}>8 spaces</option>
             </select>
 
-            <label className="settings-label">Word Wrap</label>
+            <label className="settings-label" htmlFor="settings-word-wrap">Word Wrap</label>
             <select
               id="settings-word-wrap"
               className="settings-select"

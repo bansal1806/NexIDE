@@ -4,7 +4,7 @@
 //   E2E_BROWSER=chrome|msedge                                 → pick the browser channel
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -528,6 +528,52 @@ try {
     } finally {
       await offlineContext.close();
     }
+  }
+
+  // ── Accessibility: axe-core audit of the main screens (WCAG 2.x A/AA rules) ──
+  {
+    // Own context with bypassCSP so axe can be injected; the CSP itself is checked above
+    const a11yContext = await browser.newContext({ viewport: { width: 1500, height: 900 }, bypassCSP: true });
+    const a = await a11yContext.newPage();
+    const axeSource = readFileSync(new URL('../../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
+    const findings = [];
+    const audit = async (screen) => {
+      // Let enter animations (≤300ms opacity fades) finish: mid-fade text is partly transparent,
+      // which axe measures as low contrast
+      await a.waitForTimeout(700);
+      await a.addScriptTag({ content: axeSource }).catch(() => {});
+      const violations = await a.evaluate(async () => {
+        // Monaco's internals are third-party; audit our UI around the editor
+        const r = await window.axe.run(document, { exclude: [['.monaco-editor']], resultTypes: ['violations'] });
+        return r.violations.map(v => `${v.id} (${v.impact}): ${v.nodes.slice(0, 2).map(n => n.target.join(' ')).join(', ')}`);
+      });
+      violations.forEach(v => findings.push(`${screen}: ${v}`));
+    };
+    try {
+      await a.goto(BASE);
+      await a.waitForTimeout(500);
+      await audit('welcome');
+      await a.click('#welcome-template-js');
+      await a.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+      await a.click('#btn-run-code');
+      await a.waitForFunction(() => /✓ Completed/.test(document.querySelector('#console-panel')?.innerText || ''), null, { timeout: 15000 }).catch(() => {});
+      await audit('editor + console');
+      await a.click('#btn-toggle-ai');
+      await audit('AI panel');
+      await a.click('.right-panel .panel-tab:has-text("Packages")');
+      await audit('packages panel');
+      await a.click('#btn-topbar-settings');
+      await audit('settings');
+      await a.keyboard.press('Escape');
+      await a.click('#btn-topbar-open-github');
+      await audit('GitHub dialog');
+      await a.click('#btn-close-github');
+      await a.keyboard.press('Control+p');
+      await audit('command palette');
+    } finally {
+      await a11yContext.close();
+    }
+    check('Accessibility: no axe violations on the main screens', findings.length === 0, findings.slice(0, 3).join(' | '));
   }
 
   // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
