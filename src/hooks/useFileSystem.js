@@ -152,7 +152,8 @@ export function useFileSystem() {
   // Preload source files into Monaco models (bounded so huge folders don't exhaust memory)
   const readAllFiles = useCallback(async (tree) => {
     const results = [];
-    const exts = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.json', '.html', '.css', '.md', '.py'];
+    const exts = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.json', '.html', '.css', '.md', '.py',
+                  '.txt', '.csv', '.tsv', '.yaml', '.yml', '.toml', '.xml'];
     const MAX_FILES = 300;
     const MAX_FILE_BYTES = 512 * 1024;
 

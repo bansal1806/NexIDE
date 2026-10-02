@@ -134,6 +134,34 @@ def _nx_start(debug):
 def _nx_stop():
     sys.settrace(None)
 
+_NX_WS = '/home/pyodide/workspace'
+
+def _nx_sync_files(files, entry_path):
+    """Mirror the workspace into the virtual FS so 'import helper' and open('data.csv') work."""
+    import os, shutil, importlib
+    if os.path.isdir(_NX_WS):
+        shutil.rmtree(_NX_WS)
+    os.makedirs(_NX_WS, exist_ok=True)
+    for path, content in files.items():
+        full = os.path.normpath(os.path.join(_NX_WS, path))
+        if not full.startswith(_NX_WS + '/'):
+            continue  # ignore anything escaping the workspace
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w', encoding='utf-8') as f:
+            f.write(content)
+    os.chdir(_NX_WS)
+    # Like "python path/to/main.py": the script's directory comes first on sys.path
+    entry_dir = os.path.normpath(os.path.join(_NX_WS, os.path.dirname(entry_path or '')))
+    for p in (_NX_WS, entry_dir):
+        while p in sys.path:
+            sys.path.remove(p)
+    sys.path[:0] = [entry_dir] if entry_dir == _NX_WS else [entry_dir, _NX_WS]
+    # Re-import edited workspace modules on every run
+    for name, mod in list(sys.modules.items()):
+        if (getattr(mod, '__file__', None) or '').startswith(_NX_WS):
+            del sys.modules[name]
+    importlib.invalidate_caches()
+
 def _nx_short_repr(v):
     try:
         r = repr(v)
@@ -189,6 +217,7 @@ const pyodideReady = (async () => {
     pyodide,
     newDict: pyodide.globals.get('dict'),
     nxRun: pyodide.globals.get('_nx_run'),
+    nxSyncFiles: pyodide.globals.get('_nx_sync_files'),
   };
 })();
 
@@ -198,7 +227,7 @@ pyodideReady.then(
 );
 
 self.onmessage = async (event) => {
-  const { type, id, code, debug = false, stdin = [] } = event.data || {};
+  const { type, id, code, debug = false, stdin = [], files = {}, path = 'main.py' } = event.data || {};
   if (type !== 'run') return;
   currentRunId = id;
 
@@ -232,6 +261,15 @@ self.onmessage = async (event) => {
       return line + '\n';
     },
   });
+
+  // Workspace files → virtual FS (imports between .py files, reading data files)
+  try {
+    const pyFiles = py.pyodide.toPy(files);
+    py.nxSyncFiles(pyFiles, path);
+    pyFiles.destroy();
+  } catch (err) {
+    outBuffer.push({ stream: 'stderr', text: `Could not load workspace files: ${err?.message || err}` });
+  }
 
   // Fresh namespace per run: no state leaks between runs, and helper names stay hidden
   const namespace = py.newDict();

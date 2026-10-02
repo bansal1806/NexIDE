@@ -4,6 +4,9 @@
 //   E2E_BROWSER=chrome|msedge                                 → pick the browser channel
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -264,6 +267,46 @@ try {
   const origin = new URL(BASE).origin;
   check('Python: core runtime self-hosted (same origin)', pyodideCoreRequests.length > 0 && pyodideCoreRequests.every(u => u.startsWith(origin)), pyodideCoreRequests.find(u => !u.startsWith(origin)) || `${pyodideCoreRequests.length} core requests`);
   check('Editor: Monaco is self-hosted (no CDN requests)', cdnMonacoRequests.length === 0, cdnMonacoRequests[0] || '');
+  // ── Multi-file workspace (Open Folder → imports between files) ──
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'nexide-e2e-'));
+    const files = {
+      'main.js': "import { add } from './lib/math.js';\nimport { fmt } from './lib/fmt.ts';\nimport cfg from './config.json';\nconsole.log('multi', fmt(add(cfg.base, 2)));",
+      'lib/math.js': 'export const add = (a, b) => a + b;',
+      'lib/fmt.ts': 'export const fmt = (n: number): string => `#${n}`;',
+      'config.json': '{ "base": 40 }',
+      'main.py': "import csv\nfrom helper import double\nwith open('data.csv') as f:\n    rows = list(csv.reader(f))\nprint('py-multi', double(int(rows[1][1])))",
+      'helper.py': 'def double(x):\n    return x * 2\n',
+      'data.csv': 'name,value\nanswer,21\n',
+    };
+    for (const [p, content] of Object.entries(files)) {
+      mkdirSync(join(dir, dirname(p)), { recursive: true });
+      writeFileSync(join(dir, p), content);
+    }
+
+    const ws = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+    // Use the <input webkitdirectory> fallback, which automation can drive
+    await ws.addInitScript(() => { delete window.showDirectoryPicker; });
+    await ws.goto(BASE);
+    const [chooser] = await Promise.all([ws.waitForEvent('filechooser'), ws.click('#welcome-btn-open-folder')]);
+    await chooser.setFiles(dir);
+    const wsConsole = (re, timeout) => ws.waitForFunction(
+      (src) => new RegExp(src).test(document.querySelector('#console-panel')?.innerText || ''), re.source, { timeout }
+    ).then(() => true, () => false);
+
+    await ws.click('.file-tree-item[title="main.js"]');
+    await ws.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+    await ws.click('#btn-run-code');
+    check('Workspace: JS imports between files (incl. .ts, .json)', await wsConsole(/multi #42/, 15000));
+
+    await ws.click('.file-tree-item[title="main.py"]');
+    await ws.waitForTimeout(500);
+    await ws.click('#btn-run-code');
+    check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
+    await ws.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));
 } finally {

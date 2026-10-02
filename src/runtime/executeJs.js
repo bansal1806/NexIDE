@@ -1,4 +1,5 @@
 import { checkSyntax, instrumentJS } from './instrument';
+import { usesModules, toCommonJS, createModuleSystem } from './modules';
 
 const CAP_MISSING = Symbol('missing');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -126,21 +127,29 @@ function makeConsole(emit) {
  * @param {number}  [opts.maxSteps]
  * @param {(type: string, text: string) => void} opts.onLog
  * @param {(steps: object[]) => void} [opts.onSteps]  batches of debug snapshots
+ * @param {string} [opts.path]   entry file path (resolves relative imports)
+ * @param {Record<string, string>} [opts.files]  workspace files available to `import`
  * @returns {Promise<{ ok: boolean, error?: string, line?: number|null, steps: number }>}
  */
-export async function executeJs(code, { debug = false, maxSteps = DEFAULT_MAX_STEPS, onLog, onSteps } = {}) {
+export async function executeJs(code, { debug = false, maxSteps = DEFAULT_MAX_STEPS, onLog, onSteps, path = 'main.js', files = {} } = {}) {
   let lastLog = null;
   const emit = (type, text) => { lastLog = text; onLog?.(type, text); };
   const fakeConsole = makeConsole(emit);
 
+  // import/export → CommonJS + workspace require() (only when the code uses modules, so plain
+  // scripts can still declare their own `require` / `module` / `exports`)
+  let moduleScope = null;
   let source;
   try {
-    source = debug ? instrumentJS(code) : (checkSyntax(code), code);
+    let script = code;
+    if (usesModules(code)) {
+      checkSyntax(code, 'module');
+      script = toCommonJS(code, path.replace(/\.(ts|mts|cts)$/, '.js'));
+      moduleScope = createModuleSystem(files, fakeConsole).entry(path);
+    }
+    source = debug ? instrumentJS(script) : (checkSyntax(script), script);
   } catch (err) {
-    const msg = /'import' and 'export' may appear only/.test(err.message)
-      ? 'ES module import/export is not supported in the runner (single-file scripts only).'
-      : err.message;
-    return { ok: false, error: `SyntaxError: ${msg}`, line: err.loc?.line ?? null, steps: 0 };
+    return { ok: false, error: `SyntaxError: ${err.message}`, line: err.loc?.line ?? null, steps: 0 };
   }
 
   let stepCount = 0;
@@ -179,8 +188,9 @@ export async function executeJs(code, { debug = false, maxSteps = DEFAULT_MAX_ST
   };
 
   try {
-    const fn = new AsyncFunction('console', ...Object.keys(helpers), source);
-    await fn(fakeConsole, ...Object.values(helpers));
+    const scope = { console: fakeConsole, ...(moduleScope || {}), ...helpers };
+    const fn = new AsyncFunction(...Object.keys(scope), source);
+    await fn(...Object.values(scope));
     flush();
     return { ok: true, steps: stepCount };
   } catch (err) {

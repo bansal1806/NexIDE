@@ -87,7 +87,12 @@ export function useCodeRunner() {
         finish({ ok: false, error: e.message });
       };
 
-      worker.postMessage({ type: 'run', id, code, language, debug, stdin: options.stdin || [] });
+      worker.postMessage({
+        type: 'run', id, code, language, debug,
+        stdin: options.stdin || [],
+        path: options.path,
+        files: options.files || {},
+      });
     });
   }, [addLine, addLines, finish, killWorker]);
 

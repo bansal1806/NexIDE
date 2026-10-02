@@ -32,8 +32,8 @@ const JUMPS = new Set(['ReturnStatement', 'ThrowStatement', 'BreakStatement', 'C
 const FUNCTIONS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
 
 /** Parse only — throws acorn SyntaxError with `(line:col)` in the message. */
-export function checkSyntax(code) {
-  parse(code, PARSE_OPTIONS);
+export function checkSyntax(code, sourceType = 'script') {
+  parse(code, { ...PARSE_OPTIONS, sourceType });
 }
 
 function patternNames(pattern, out) {

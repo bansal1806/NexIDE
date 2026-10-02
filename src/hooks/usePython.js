@@ -89,7 +89,12 @@ export function usePython() {
 
     return new Promise((resolve) => {
       runRef.current = { id, resolve, onDebugSteps: options.onDebugSteps, start: performance.now() };
-      worker.postMessage({ type: 'run', id, code, debug: !!options.debug, stdin: options.stdin || [] });
+      worker.postMessage({
+        type: 'run', id, code, debug: !!options.debug,
+        stdin: options.stdin || [],
+        files: options.files || {},
+        path: options.path,
+      });
     });
   }, [spawn, finish, isReady]);
 

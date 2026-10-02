@@ -94,9 +94,9 @@ describe('normal execution', () => {
     expect(result.line).toBe(2);
   });
 
-  it('explains unsupported module syntax', async () => {
+  it('explains that npm (bare) imports are not available', async () => {
     const { result } = await run('import x from "y";');
-    expect(result.error).toMatch(/not supported/);
+    expect(result.error).toMatch(/only relative imports/);
   });
 
   it('reports runtime errors', async () => {

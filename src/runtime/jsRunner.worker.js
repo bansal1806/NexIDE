@@ -26,7 +26,7 @@ function onLog(type, text) {
 }
 
 self.onmessage = async (event) => {
-  const { type, id, code, language, debug, maxSteps } = event.data || {};
+  const { type, id, code, language, debug, maxSteps, path, files } = event.data || {};
   if (type !== 'run') return;
 
   // Program input for prompt(): one line per call, echoed like a terminal; null at EOF
@@ -53,6 +53,8 @@ self.onmessage = async (event) => {
   const result = await executeJs(source, {
     debug,
     maxSteps,
+    path: path || (language === 'typescript' ? 'main.ts' : 'main.js'),
+    files: files || {},
     onLog,
     onSteps: steps => self.postMessage({ type: 'steps', runId, steps }),
   });
