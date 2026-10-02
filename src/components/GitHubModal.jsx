@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { useDialog } from '../hooks/useDialog';
 import { X, AlertCircle, Loader2, Search } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
 import { parseGitHubUrl, fetchRepoInfo, fetchRepoTree } from '../services/github';
@@ -16,6 +17,8 @@ export function GitHubModal({ open, onClose, onLoad, githubToken }) {
   const [input, setInput]     = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
+  const panelRef = useRef(null);
+  useDialog(panelRef, { active: open, onClose });
 
   if (!open) return null;
 
@@ -55,7 +58,7 @@ export function GitHubModal({ open, onClose, onLoad, githubToken }) {
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Open GitHub repository" id="github-modal">
-      <div className="modal-panel github-panel">
+      <div className="modal-panel github-panel" ref={panelRef} tabIndex={-1}>
         <div className="modal-header">
           <Github size={14} />
           <span>Open GitHub Repository</span>

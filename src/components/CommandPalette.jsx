@@ -1,4 +1,5 @@
-import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useRef, useMemo } from 'react';
+import { useDialog } from '../hooks/useDialog';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, FileCode, Zap, Settings, FolderOpen, TerminalSquare } from 'lucide-react';
@@ -22,11 +23,9 @@ function PaletteInner({ onClose, openTabs, fileTree, onOpenFile, onCommand }) {
   const [query, setQuery]       = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 40);
-    return () => clearTimeout(t);
-  }, []);
+  const panelRef = useRef(null);
+  // Focuses the search input (first focusable), traps Tab, Escape closes, focus returns on close
+  useDialog(panelRef, { onClose });
 
   const items = useMemo(() => {
     const isCmd  = query.startsWith('>');
@@ -93,6 +92,8 @@ function PaletteInner({ onClose, openTabs, fileTree, onOpenFile, onCommand }) {
 
   return (
     <motion.div
+      ref={panelRef}
+      tabIndex={-1}
       className="palette-panel"
       initial={{ opacity: 0, y: -16, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}

@@ -564,6 +564,25 @@ try {
     }
   }
 
+  // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
+  {
+    await page.focus('#btn-topbar-settings');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#settings-modal', { timeout: 5000 });
+    const inside = () => page.evaluate(() => !!document.querySelector('#settings-modal')?.contains(document.activeElement));
+    const focusedIn = await page.waitForFunction(() => document.querySelector('#settings-modal')?.contains(document.activeElement), null, { timeout: 5000 }).then(() => true, () => false);
+    let trapped = true;
+    for (let i = 0; i < 30; i++) {
+      await page.keyboard.press(i % 7 === 6 ? 'Shift+Tab' : 'Tab');
+      if (!(await inside())) { trapped = false; break; }
+    }
+    await page.keyboard.press('Escape');
+    const closed = await page.waitForSelector('#settings-modal', { state: 'detached', timeout: 5000 }).then(() => true, () => false);
+    const returned = await page.waitForFunction(() => document.activeElement?.id === 'btn-topbar-settings', null, { timeout: 5000 }).then(() => true, () => false);
+    check('Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns',
+      focusedIn && trapped && closed && returned, JSON.stringify({ focusedIn, trapped, closed, returned }));
+  }
+
   // ── Accessibility: axe-core audit of the main screens (WCAG 2.x A/AA rules) ──
   {
     // Own context with bypassCSP so axe can be injected; the CSP itself is checked above
