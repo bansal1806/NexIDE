@@ -31,6 +31,8 @@ function themeColors({ bg, line, border, accent, fg, gutter }) {
     'editor.background':           bg,
     'editor.foreground':           fg,
     'editorLineNumber.foreground': gutter,
+    // Monaco fades the final empty line's number to 40% by default, which fails contrast
+    'editorLineNumber.dimmedForeground': gutter,
     'editorLineNumber.activeForeground': fg,
     'editor.selectionBackground':  `${accent}40`,
     'editor.inactiveSelectionBackground': `${accent}26`,
