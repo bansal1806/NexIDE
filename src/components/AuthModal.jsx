@@ -38,9 +38,15 @@ export function AuthModal({ open, onClose }) {
 
   const handleLogout = async () => {
     setLoading(true);
-    await signOut();
-    setLoading(false);
-    onClose();
+    try {
+      const { error } = (await signOut()) || {};
+      if (error) throw error;
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

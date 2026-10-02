@@ -94,7 +94,9 @@ function MessageBubble({ message }) {
   );
 }
 
-export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded }) {
+export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, onApiKeyNeeded }) {
+  // Own key → direct to Gemini; signed in → built-in proxy (if the server has a key)
+  const canUseAI = hasApiKey || isSignedIn;
   const { messages, isLoading, error, sendMessage, clearMessages } = gemini || {};
   const onClear = clearMessages || (() => {});
   const [input, setInput] = useState('');
@@ -137,7 +139,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
           <h3>NexIDE AI</h3>
           <div className="ai-status">
             <div className="ai-status-dot" aria-hidden="true" />
-            {hasApiKey ? 'Gemini 2.0 Flash' : 'API key required'}
+            {hasApiKey ? 'Gemini · your key' : isSignedIn ? 'Gemini · built-in' : 'Setup required'}
           </div>
         </div>
         <div style={{ flex: 1 }} />
@@ -154,11 +156,11 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
       </div>
 
       {/* API Key Warning */}
-      {!hasApiKey && (
+      {!canUseAI && (
         <div className="api-key-banner" role="alert">
           <AlertTriangle size={12} aria-hidden="true" />
           <span>
-          Set your <strong>Gemini API key</strong> to enable AI assistance.{' '}
+          Add your <strong>Gemini API key</strong> or sign in to enable AI assistance.{' '}
             <button
               style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', fontSize: 'inherit', padding: 0, textDecoration: 'underline' }}
               onClick={onApiKeyNeeded}
@@ -169,7 +171,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
 
       {/* Messages */}
       <div className="ai-messages" aria-live="polite" aria-label="Chat messages">
-        {messages.length === 0 && (
+        {(messages || []).length === 0 && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -180,7 +182,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
               NexIDE AI Assistant
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 16 }}>
-              Powered by Gemini 2.0 Flash
+              Powered by Google Gemini
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -208,7 +210,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
                     e.target.style.color = 'var(--text-secondary)';
                   }}
                   onClick={() => { setInput(action.text); textareaRef.current?.focus(); }}
-                  disabled={!hasApiKey}
+                  disabled={!canUseAI}
                 >
                   {action.label}
                 </button>
@@ -218,7 +220,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
         )}
 
         <AnimatePresence initial={false}>
-          {messages.map(msg => (
+          {(messages || []).map(msg => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
         </AnimatePresence>
@@ -264,8 +266,8 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={hasApiKey ? 'Ask AI about your code… (Enter to send, Shift+Enter for newline)' : 'Set VITE_GEMINI_API_KEY to enable AI chat'}
-            disabled={!hasApiKey || isLoading}
+            placeholder={canUseAI ? 'Ask AI about your code… (Enter to send, Shift+Enter for newline)' : 'Add a Gemini key in Settings or sign in to chat'}
+            disabled={!canUseAI || isLoading}
             rows={1}
             aria-label="AI chat input"
           />
@@ -273,7 +275,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, onApiKeyNeeded
             id="btn-send-ai"
             className="btn-send"
             onClick={handleSend}
-            disabled={!input.trim() || isLoading || !hasApiKey}
+            disabled={!input.trim() || isLoading || !canUseAI}
             aria-label="Send message"
             title="Send (Enter)"
           >

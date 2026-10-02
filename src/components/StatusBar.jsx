@@ -1,6 +1,6 @@
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
-export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 1, status = 'idle', githubMode, branch, fileName, isDirty, nodeCount = 0 }) {
+export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 1, status = 'idle', githubMode, branch, fileName, isDirty, nodeCount = 0, notice = null }) {
   const statusConfig = {
     idle:    { label: 'Ready',   color: 'default' },
     running: { label: 'Running', color: 'running' },
@@ -58,6 +58,20 @@ export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 
       )}
 
       <div className="statusbar-spacer" />
+
+      {notice && (
+        <>
+          <div
+            className="statusbar-item"
+            role={notice.type === 'error' ? 'alert' : 'status'}
+            style={{ color: notice.type === 'error' ? 'var(--accent-red, #ef4444)' : undefined, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={notice.text}
+          >
+            {notice.text}
+          </div>
+          <div className="statusbar-divider" aria-hidden="true" />
+        </>
+      )}
 
       {/* Right section: execution status */}
       <div

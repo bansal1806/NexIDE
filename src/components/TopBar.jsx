@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Play, Loader2, MessageSquare, Map, TerminalSquare, Settings, FolderOpen, Search, Globe, User, Bug } from 'lucide-react';
+import { Play, Square, MessageSquare, Map as MapIcon, TerminalSquare, Settings, FolderOpen, Search, Globe, User, Bug } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
 
 const LANGUAGES = [
@@ -20,6 +20,7 @@ export const TopBar = memo(function TopBar({
   onLanguageChange,
   isRunning,
   onRun,
+  onStop,
   onDebug,
   activePanel,
   onPanelChange,
@@ -78,16 +79,15 @@ export const TopBar = memo(function TopBar({
       <button
         id="btn-run-code"
         className={`btn-run ${isRunning ? 'running' : ''}`}
-        onClick={onRun}
-        disabled={isRunning}
-        aria-label={isRunning ? 'Running code...' : 'Run code (Ctrl+Enter)'}
-        title="Run code (Ctrl+Enter)"
+        onClick={isRunning ? onStop : onRun}
+        aria-label={isRunning ? 'Stop execution' : 'Run code (Ctrl+Enter)'}
+        title={isRunning ? 'Stop execution' : 'Run code (Ctrl+Enter)'}
       >
         {isRunning
-          ? <Loader2 size={13} className="run-icon" aria-hidden="true" />
+          ? <Square size={12} fill="currentColor" aria-hidden="true" />
           : <Play size={13} fill="currentColor" aria-hidden="true" />
         }
-        {isRunning ? 'Running…' : 'Run'}
+        {isRunning ? 'Stop' : 'Run'}
       </button>
 
       <button
@@ -115,7 +115,7 @@ export const TopBar = memo(function TopBar({
         <MessageSquare size={15} />
       </button>
       <button id="btn-toggle-map" className={`btn-icon ${activePanel === 'map' ? 'active' : ''}`} onClick={() => activeSetter('map')} aria-label="Code Map" title="Code Map">
-        <Map size={15} />
+        <MapIcon size={15} />
       </button>
 
       <div className="topbar-divider" aria-hidden="true" />

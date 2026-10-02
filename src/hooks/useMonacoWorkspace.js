@@ -1,76 +1,70 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMonaco } from '@monaco-editor/react';
+import { getLang } from '../utils/files';
 
+const uriFor = (monaco, path) => monaco.Uri.parse(`file:///${path}`);
+
+/**
+ * Keep a Monaco model for every workspace file so cross-file features work, and
+ * report edits made to background models (e.g. multi-file rename) via onModelChanged.
+ *
+ * Only models that this hook created and that are no longer part of the workspace are
+ * disposed — never the model the editor is currently showing.
+ */
 export function useMonacoWorkspace(files, onModelChanged) {
   const monaco = useMonaco();
+  const ownedRef = useRef(new Map()); // uri string -> model
 
-  // Sync files to Monaco models
   useEffect(() => {
     if (!monaco || !files) return;
+    const owned = ownedRef.current;
+    const wanted = new Set();
 
-    const currentModels = [];
-
-    files.forEach(file => {
-      const uri = monaco.Uri.parse(`file:///${file.path}`);
+    for (const file of files) {
+      const uri = uriFor(monaco, file.path);
+      const key = uri.toString();
+      wanted.add(key);
       let model = monaco.editor.getModel(uri);
-
       if (!model) {
-        // Find language from extension
-        const ext = file.path.split('.').pop();
-        let lang = 'javascript';
-        if (ext === 'ts' || ext === 'tsx') lang = 'typescript';
-        else if (ext === 'json') lang = 'json';
-        else if (ext === 'html') lang = 'html';
-        else if (ext === 'css') lang = 'css';
-        else if (ext === 'md') lang = 'markdown';
-        else if (ext === 'py') lang = 'python';
-
-        model = monaco.editor.createModel(file.content, lang, uri);
-      } else if (model.getValue() !== file.content) {
-        // If the model exists but content differs (from an external reload), update it
-        // Only do this if it's an initial sync, else let the editor manage it
-        // To be safe, we only set it if someone called sync again
-        model.setValue(file.content);
+        model = monaco.editor.createModel(file.content ?? '', getLang(file.path), uri);
+        owned.set(key, model);
+      } else if (!model.isAttachedToEditor() && model.getValue() !== (file.content ?? '')) {
+        // Stale model left over from a previous workspace with the same path
+        model.setValue(file.content ?? '');
       }
-      
-      currentModels.push(model);
-    });
+    }
 
-    // Cleanup models when workspace changes
-    return () => {
-      currentModels.forEach(model => model.dispose());
-    };
+    for (const [key, model] of owned) {
+      if (!wanted.has(key)) {
+        if (!model.isDisposed() && !model.isAttachedToEditor()) model.dispose();
+        owned.delete(key);
+      }
+    }
   }, [monaco, files]);
 
-  // Listen for background edits (multi-file renames)
+  // Dispose everything we created on unmount
+  useEffect(() => () => {
+    for (const model of ownedRef.current.values()) {
+      if (!model.isDisposed()) model.dispose();
+    }
+    ownedRef.current.clear();
+  }, []);
+
+  const onChangedRef = useRef(onModelChanged);
+  useEffect(() => { onChangedRef.current = onModelChanged; }, [onModelChanged]);
+
+  // Report edits to models that are not attached to the visible editor
   useEffect(() => {
     if (!monaco) return;
-
     const disposables = [];
-
-    // The event fires when a model's content changes
-    const attachListener = (model) => {
-      disposables.push(
-        model.onDidChangeContent((e) => {
-          // Detect bulk edits or renames
-          // e.isFlush is true if it was a setValue (which we ignore here)
-          if (!e.isFlush && onModelChanged) {
-            onModelChanged(model.uri.path.substring(1), model.getValue());
-          }
-        })
-      );
+    const attach = (model) => {
+      disposables.push(model.onDidChangeContent((e) => {
+        if (e.isFlush || model.isAttachedToEditor()) return; // the editor's own onChange handles these
+        onChangedRef.current?.(model.uri.path.substring(1), model.getValue());
+      }));
     };
-
-    // Attach to existing models
-    monaco.editor.getModels().forEach(attachListener);
-
-    // Attach to future models
-    disposables.push(
-      monaco.editor.onDidCreateModel(attachListener)
-    );
-
-    return () => {
-      disposables.forEach(d => d.dispose());
-    };
-  }, [monaco, onModelChanged]);
+    monaco.editor.getModels().forEach(attach);
+    disposables.push(monaco.editor.onDidCreateModel(attach));
+    return () => disposables.forEach(d => d.dispose());
+  }, [monaco]);
 }

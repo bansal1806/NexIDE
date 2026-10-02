@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState, memo } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo, memo } from 'react';
 import * as d3 from 'd3';
 import { parseCode, parseProjectMap } from '../utils/codeParser';
 import { RefreshCw, Layout, FileCode2 } from 'lucide-react';
@@ -22,11 +22,26 @@ const NODE_ICONS = {
   variable:  'x',
 };
 
-export const CodeMap = memo(function CodeMap({ activeTab, tabs, fileTree = [], onNodeClick }) {
+export const CodeMap = memo(function CodeMap({ activeTab, fileTree = [], onNodeClick }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const simRef = useRef(null);
   const [mapType, setMapType] = useState('file'); // 'file' | 'project'
+
+  // Re-parse at most every 400ms while typing instead of rebuilding the graph per keystroke
+  const content = activeTab?.content ?? '';
+  const lang = activeTab?.lang;
+  const [parsed, setParsed] = useState({ content, lang });
+  useEffect(() => {
+    const t = setTimeout(() => setParsed({ content, lang }), 400);
+    return () => clearTimeout(t);
+  }, [content, lang]);
+
+  const graph = useMemo(() => (
+    mapType === 'project'
+      ? parseProjectMap(fileTree)
+      : parseCode(parsed.content, parsed.lang)
+  ), [mapType, fileTree, parsed]);
 
   const render = useCallback(() => {
     const svg = d3.select(svgRef.current);
@@ -34,9 +49,9 @@ export const CodeMap = memo(function CodeMap({ activeTab, tabs, fileTree = [], o
 
     if (!svgRef.current || !containerRef.current) return;
 
-    const { nodes, edges } = mapType === 'project'
-      ? parseProjectMap(fileTree)
-      : parseCode(activeTab?.content, activeTab?.lang);
+    // d3 mutates node objects (x, y, fx…), so work on copies
+    const nodes = graph.nodes.map(n => ({ ...n }));
+    const edges = graph.edges;
 
     if (nodes.length === 0) return;
 
@@ -119,6 +134,7 @@ export const CodeMap = memo(function CodeMap({ activeTab, tabs, fileTree = [], o
     const linkData = edges.map(e => ({
       source: nodes[e.source],
       target: nodes[e.target],
+      type: e.type,
     }));
 
     // Force simulation
@@ -256,16 +272,14 @@ export const CodeMap = memo(function CodeMap({ activeTab, tabs, fileTree = [], o
       .duration(300)
       .style('opacity', 1);
 
-  }, [activeTab, mapType, fileTree, onNodeClick]);
+  }, [graph, onNodeClick]);
 
   useEffect(() => {
     render();
     return () => { if (simRef.current) simRef.current.stop(); };
   }, [render]);
 
-  const { nodes } = mapType === 'project'
-    ? parseProjectMap(tabs)
-    : parseCode(activeTab?.content, activeTab?.lang);
+  const { nodes } = graph;
   const isEmpty = nodes.length === 0;
 
   return (
@@ -323,3 +337,5 @@ export const CodeMap = memo(function CodeMap({ activeTab, tabs, fileTree = [], o
     </div>
   );
 });
+
+export default CodeMap;

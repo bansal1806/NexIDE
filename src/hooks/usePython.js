@@ -1,136 +1,112 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
+import { appendLines, makeLine } from '../runtime/output';
 
+const WORKER_URL = '/pyodide.worker.js';
+
+/**
+ * Python runner backed by Pyodide in a Web Worker.
+ * Stop terminates the worker and spawns a fresh one (Pyodide reloads from cache).
+ */
 export function usePython() {
-  const [isReady, setIsReady]     = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [output, setOutput]       = useState([]);
-  const [status, setStatus]       = useState('idle');
-  const workerRef                 = useRef(null);
-  const resolveRunRef             = useRef(null);
-  const onDebugStepRef           = useRef(null);
+  const [isReady, setIsReady] = useState(false);
+  const [output, setOutput]   = useState([]);
+  const [status, setStatus]   = useState('idle');
+  const workerRef = useRef(null);
+  const runRef    = useRef(null); // { id, resolve, onDebugSteps, start }
 
-  const addLine = useCallback((type, text) => {
-    setOutput(prev => {
-      // Avoid adding multiple empty lines
-      if (text.trim() === '' && type !== 'system') return prev;
-      return [
-        ...prev,
-        { id: Date.now() + Math.random(), type, text, time: new Date().toLocaleTimeString('en', { hour12: false }) },
-      ];
-    });
+  const addLines = useCallback((lines) => setOutput(prev => appendLines(prev, lines)), []);
+  const addLine  = useCallback((type, text) => addLines([makeLine(type, text)]), [addLines]);
+
+  const finish = useCallback((result) => {
+    const run = runRef.current;
+    if (!run) return;
+    runRef.current = null;
+    run.resolve(result);
   }, []);
 
-  // Initialize Worker once
-  useEffect(() => {
-    const worker = new Worker('/pyodide.worker.js');
-    workerRef.current = worker;
-    
-    worker.onmessage = (event) => {
-      const data = event.data;
-      if (data.__python_output) {
-        // Stream stdout or stderr chunk
-        const lines = data.text.split('\n');
-        lines.forEach(l => {
-          if (l.trim()) addLine(data.stream === 'stderr' ? 'warn' : 'log', l);
-        });
-      } else if (data.__debug_step) {
-        // Capture a debug step
-        if (onDebugStepRef.current) {
-          onDebugStepRef.current({
-            line: data.line,
-            state: data.locals
-          });
-        }
-      } else if (data.__python_done) {
-        // Run completely finished
-        if (resolveRunRef.current) {
-          resolveRunRef.current(data);
-          resolveRunRef.current = null;
-        }
-      }
-    };
-    
-    setIsReady(true);
-    return () => worker.terminate();
-  }, [addLine]);
-
-  const runPython = useCallback(async (code, options = {}) => {
-    if (!workerRef.current) {
-      addLine('error', '✗ Python worker not initialized.');
-      setStatus('error');
+  const handleMessage = useCallback(({ data }) => {
+    if (!data) return;
+    if (data.type === 'ready') { setIsReady(true); return; }
+    if (data.type === 'load-error') {
+      setIsReady(false);
+      addLine('error', `✗ Python runtime failed to load: ${data.error}`);
       return;
     }
 
-    setOutput([]);
-    setStatus('running');
-    setIsLoading(true);
+    const run = runRef.current;
+    if (!run || data.runId !== run.id) return;
 
-    const startTime = performance.now();
-    addLine('system', '▶ Running Python via Web Worker...');
-
-    try {
-      const runId = Date.now();
-      const runPromise = new Promise(resolve => {
-        resolveRunRef.current = resolve;
-      });
-
-      onDebugStepRef.current = options?.onDebugStep || null;
-
-      // Send execution request to worker
-      workerRef.current.postMessage({ id: runId, code, debug: !!options?.debug });
-
-      const result = await runPromise;
-      const elapsed = (performance.now() - startTime).toFixed(1);
-
-      if (result.error) {
-        addLine('error', `✗ ${result.error}`);
-        addLine('system', `Failed after ${elapsed}ms`);
-        setStatus('error');
+    if (data.type === 'output') {
+      // The worker sends whole lines (blank lines from print() are kept)
+      addLines(data.chunks.map(c => makeLine(c.stream === 'stderr' ? 'warn' : 'log', c.text)));
+    } else if (data.type === 'steps') {
+      run.onDebugSteps?.(data.steps);
+    } else if (data.type === 'done') {
+      const elapsed = (performance.now() - run.start).toFixed(1);
+      const lines = [];
+      if (data.ok) {
+        if (data.result && data.result !== 'None') lines.push(makeLine('info', `↩ ${data.result}`));
+        lines.push(makeLine('success', `✓ Completed in ${elapsed}ms`));
       } else {
-        if (result.results && result.results !== 'undefined' && result.results !== 'None') {
-          addLine('info', `↩ ${result.results}`);
-        }
-        addLine('success', `✓ Completed in ${elapsed}ms`);
-        setStatus('success');
+        lines.push(makeLine('error', `✗ ${data.error}`));
+        lines.push(makeLine('system', `Failed after ${elapsed}ms`));
       }
-    } catch (e) {
-      addLine('error', `✗ Unexpected error communicating with Python worker: ${e.message}`);
-      setStatus('error');
-    } finally {
-      setIsLoading(false);
+      addLines(lines);
+      setStatus(data.ok ? 'success' : 'error');
+      finish({ ok: data.ok, error: data.error });
     }
-  }, [addLine]);
+  }, [addLine, addLines, finish]);
+
+  const spawn = useCallback(() => {
+    const worker = new Worker(WORKER_URL);
+    worker.onmessage = handleMessage;
+    worker.onerror = (e) => {
+      e.preventDefault?.();
+      addLine('error', `✗ Python worker error: ${e.message || 'failed to start'}`);
+      setIsReady(false);
+    };
+    workerRef.current = worker;
+    return worker;
+  }, [handleMessage, addLine]);
+
+  useEffect(() => {
+    const worker = spawn();
+    return () => {
+      worker.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
+    };
+  }, [spawn]);
+
+  const runPython = useCallback((code, options = {}) => {
+    const worker = workerRef.current || spawn();
+    if (runRef.current) finish({ ok: false, error: 'Superseded by a new run' });
+
+    const id = Date.now() + Math.random();
+    setOutput([makeLine('system', isReady
+      ? '▶ Running Python…'
+      : '▶ Loading Python runtime (first run can take a few seconds)…')]);
+    setStatus('running');
+
+    return new Promise((resolve) => {
+      runRef.current = { id, resolve, onDebugSteps: options.onDebugSteps, start: performance.now() };
+      worker.postMessage({ type: 'run', id, code, debug: !!options.debug });
+    });
+  }, [spawn, finish, isReady]);
 
   const stopPython = useCallback(() => {
-    if (workerRef.current && status === 'running') {
-      workerRef.current.terminate();
-      workerRef.current = new Worker('/pyodide.worker.js'); // restart sterile worker bounds
-      
-      // Re-attach message handler for new worker
-      workerRef.current.onmessage = (event) => {
-        const data = event.data;
-        if (data.__python_output) {
-          const lines = data.text.split('\\n');
-          lines.forEach(l => {
-            if (l.trim()) addLine(data.stream === 'stderr' ? 'warn' : 'log', l);
-          });
-        } else if (data.__python_done) {
-          if (resolveRunRef.current) {
-            resolveRunRef.current(data);
-            resolveRunRef.current = null;
-          }
-        }
-      };
+    if (!runRef.current) return;
+    workerRef.current?.terminate();
+    setIsReady(false);
+    spawn();
+    addLine('error', '■ Execution stopped by user.');
+    setStatus('error');
+    finish({ ok: false, error: 'Stopped' });
+  }, [spawn, addLine, finish]);
 
-      if (resolveRunRef.current) {
-        resolveRunRef.current({ error: 'Terminated by user' });
-        resolveRunRef.current = null;
-      }
-      addLine('error', '■ Worker forcibly terminated.');
-    }
-  }, [status, addLine]);
+  const clearOutput = useCallback(() => {
+    setOutput([]);
+    setStatus(s => (s === 'running' ? s : 'idle'));
+  }, []);
 
-  const clearOutput = useCallback(() => { setOutput([]); setStatus('idle'); }, []);
-
-  return { isReady, isLoading, output, status, runPython, stopPython, clearOutput };
+  return { isReady, output, status, runPython, stopPython, clearOutput };
 }

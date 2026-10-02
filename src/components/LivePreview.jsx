@@ -2,6 +2,9 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { Monitor, RefreshCw, ExternalLink, AlertCircle } from 'lucide-react';
 
 // Build a self-contained srcdoc from code + language
+// Inline <script> content must not contain "</script" or it would end the tag early
+const escapeInlineScript = (code) => code.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
+
 function buildSandbox(code, language, allFiles = {}) {
   const consoleInterceptor = `
 <script>
@@ -47,7 +50,9 @@ function buildSandbox(code, language, allFiles = {}) {
 </head>
 <body>
 <script>
-try { ${code} } catch(e) { console.error(e.message); }
+try {
+${escapeInlineScript(code)}
+} catch(e) { console.error(e.message); }
 </script>
 </body>
 </html>`;
@@ -76,20 +81,29 @@ const PREVIEWABLE = ['html', 'javascript', 'typescript', 'css'];
 
 export function LivePreview({ code, language, onConsoleMessage }) {
   const iframeRef  = useRef(null);
+  const pendingHtmlRef = useRef(null);
+  const [frameKey, setFrameKey] = useState(0);
   const [error, setError]     = useState(null);
   const [loading, setLoading] = useState(false);
 
   const canPreview = PREVIEWABLE.includes(language);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (!iframeRef.current || !canPreview) return;
     setLoading(true);
     setError(null);
     try {
-      const srcdoc = buildSandbox(code, language);
-      iframeRef.current.srcdoc = srcdoc;
+      let source = code;
+      if (language === 'typescript') {
+        const { transpileTS } = await import('../runtime/transpile');
+        source = transpileTS(code);
+      }
+      // Reload the host page; it asks for the document once it's ready (see public/preview.html)
+      pendingHtmlRef.current = buildSandbox(source, language);
+      setFrameKey(k => k + 1);
     } catch (e) {
       setError(e.message);
+      setLoading(false);
     }
   }, [code, language, canPreview]);
 
@@ -100,18 +114,28 @@ export function LivePreview({ code, language, onConsoleMessage }) {
     return () => clearTimeout(t);
   }, [code, language, refresh, canPreview]);
 
-  // Listen for console messages from iframe
+  // Messages from the preview frame: "ready" handshake and console output
   useEffect(() => {
     const handler = (e) => {
-      if (e.data?.__nexide && onConsoleMessage) {
-        onConsoleMessage(e.data.type, e.data.data.join(' '));
+      // Only accept messages from our own preview frame
+      const frameWindow = iframeRef.current?.contentWindow;
+      if (!frameWindow || e.source !== frameWindow) return;
+      if (e.data?.__nexidePreviewReady) {
+        if (pendingHtmlRef.current != null) {
+          // The frame has an opaque origin (sandboxed), so '*' is the only usable target
+          frameWindow.postMessage({ __nexidePreview: true, html: pendingHtmlRef.current }, '*');
+        }
+        setLoading(false);
+        return;
       }
+      const { __nexide, type, data } = e.data || {};
+      if (!__nexide || !onConsoleMessage || !Array.isArray(data)) return;
+      if (!['log', 'info', 'warn', 'error'].includes(type)) return;
+      onConsoleMessage(type, data.map(String).join(' ').slice(0, 10_000));
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
   }, [onConsoleMessage]);
-
-  const handleLoad = () => setLoading(false);
 
   return (
     <div className="live-preview" id="live-preview-panel">
@@ -147,11 +171,13 @@ export function LivePreview({ code, language, onConsoleMessage }) {
 
       {canPreview ? (
         <iframe
+          key={frameKey}
           ref={iframeRef}
           id="preview-iframe"
           className="preview-frame"
-          sandbox="allow-scripts allow-modals allow-popups"
-          onLoad={handleLoad}
+          src="/preview.html"
+          sandbox="allow-scripts allow-modals allow-popups allow-forms"
+          referrerPolicy="no-referrer"
           title="Live preview"
           aria-label="Live code preview"
         />
@@ -164,3 +190,5 @@ export function LivePreview({ code, language, onConsoleMessage }) {
     </div>
   );
 }
+
+export default LivePreview;

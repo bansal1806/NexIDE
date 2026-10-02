@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { AuthContext } from './authContextDef';
 
+const notConfigured = async () => ({
+  data: null,
+  error: new Error('Cloud accounts are not configured for this deployment.'),
+});
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(() => !!(supabase && supabase.auth));
@@ -31,14 +36,24 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const value = {
+  const value = supabase ? {
     signUp: (data) => supabase.auth.signUp(data),
     signIn: (data) => supabase.auth.signInWithPassword(data),
     signOut: () => supabase.auth.signOut(),
     user,
+    isConfigured: true,
+  } : {
+    signUp: notConfigured,
+    signIn: notConfigured,
+    signOut: notConfigured,
+    user: null,
+    isConfigured: false,
   };
 
   return (
@@ -47,4 +62,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
-

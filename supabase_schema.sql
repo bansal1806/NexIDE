@@ -1,54 +1,62 @@
--- Run this in your Supabase SQL Editor
+-- NexIDE schema — run in your Supabase SQL Editor for a fresh project.
+-- Existing projects: run supabase/migrations/001_hardening.sql instead.
 
--- 1. Create User Settings Table
+-- 1. User Settings (non-secret preferences only; API keys stay in the browser)
 CREATE TABLE IF NOT EXISTS public.user_settings (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     settings JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 2. Create Projects Table
+-- 2. Projects
 CREATE TABLE IF NOT EXISTS public.projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL CONSTRAINT projects_name_len CHECK (char_length(name) BETWEEN 1 AND 100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+CREATE INDEX IF NOT EXISTS projects_owner_id_idx ON public.projects (owner_id);
+CREATE INDEX IF NOT EXISTS projects_owner_updated_idx ON public.projects (owner_id, updated_at DESC);
 
--- 3. Create Files Table (for virtual file system)
+-- 3. Files (virtual file system)
 CREATE TABLE IF NOT EXISTS public.files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
-    path TEXT NOT NULL,
+    path TEXT NOT NULL CONSTRAINT files_path_len CHECK (char_length(path) BETWEEN 1 AND 512),
     name TEXT NOT NULL,
-    content TEXT DEFAULT '',
+    content TEXT DEFAULT '' CONSTRAINT files_content_size CHECK (octet_length(content) <= 2097152),
     language TEXT DEFAULT 'plaintext',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(project_id, path)
 );
 
--- 4. Enable Row Level Security (RLS)
+-- 4. Row Level Security
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.files ENABLE ROW LEVEL SECURITY;
 
--- 5. RLS Policies
+REVOKE ALL ON public.user_settings, public.projects, public.files FROM anon;
 
--- User Settings: Users can only select, insert, and update their own settings
+-- 5. Policies ((select auth.uid()) is evaluated once per query, not per row)
 CREATE POLICY "Users can manage their own settings" ON public.user_settings
-    FOR ALL USING (auth.uid() = id);
+    FOR ALL TO authenticated
+    USING ((select auth.uid()) = id)
+    WITH CHECK ((select auth.uid()) = id);
 
--- Projects: Users can only see and manage their own projects
 CREATE POLICY "Users can manage their own projects" ON public.projects
-    FOR ALL USING (auth.uid() = owner_id);
+    FOR ALL TO authenticated
+    USING ((select auth.uid()) = owner_id)
+    WITH CHECK ((select auth.uid()) = owner_id);
 
--- Files: Users can only see and manage files inside projects they own
 CREATE POLICY "Users can manage files in their projects" ON public.files
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM public.projects 
-            WHERE projects.id = files.project_id AND projects.owner_id = auth.uid()
-        )
-    );
+    FOR ALL TO authenticated
+    USING (EXISTS (
+        SELECT 1 FROM public.projects p
+        WHERE p.id = files.project_id AND p.owner_id = (select auth.uid())
+    ))
+    WITH CHECK (EXISTS (
+        SELECT 1 FROM public.projects p
+        WHERE p.id = files.project_id AND p.owner_id = (select auth.uid())
+    ));

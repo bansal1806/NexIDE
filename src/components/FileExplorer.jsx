@@ -106,7 +106,7 @@ function TreeNode({ node, depth, onFileClick, activeFilePath, onDelete, githubMo
 export const FileExplorer = memo(function FileExplorer({
   fileTree, rootName, isLoading, onOpenFolder, onFileClick, activeFilePath,
   onRefresh, githubMode, githubInfo, onFetchContent,
-  cloudMode, cloudProjects, onOpenCloudProject, onCreateCloudProject, user
+  cloudMode, cloudProjects, onOpenCloudProject, onCreateCloudProject, onNewCloudFile, user
 }) {
   const hasTree = fileTree && fileTree.length > 0;
   const [showCloudProjects, setShowCloudProjects] = useState(false);
@@ -120,6 +120,11 @@ export const FileExplorer = memo(function FileExplorer({
           <ChevronDown size={10} style={{ marginLeft: 4 }} />
         </span>
         <div style={{ display: 'flex', gap: 2 }}>
+          {cloudMode && (
+            <button className="explorer-btn" onClick={onNewCloudFile} title="New File" aria-label="New file">
+              <Plus size={11} />
+            </button>
+          )}
           {hasTree && (
             <button className="explorer-btn" onClick={onRefresh} title="Refresh" aria-label="Refresh file tree">
               <RotateCcw size={11} />
@@ -173,13 +178,7 @@ export const FileExplorer = memo(function FileExplorer({
               </button>
             )}
             {cloudMode && (
-               <button className="explorer-open-btn" onClick={() => {
-                 const name = window.prompt("New File Name (e.g. index.js):");
-                 if (name) {
-                    const node = { path: name, name, kind: 'file', _content: '' };
-                    onFileClick(node);
-                 }
-               }}>
+               <button className="explorer-open-btn" onClick={onNewCloudFile}>
                  <Plus size={13} /> New File
                </button>
             )}

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import {
   Play, Pause, SkipBack, SkipForward,
   RotateCcw, Bug, ChevronsLeft, ChevronsRight,
-  Zap, Clock
+  Zap, Clock, CircleDot
 } from 'lucide-react';
 
 const SPEEDS = [0.5, 1, 2, 4];
@@ -19,6 +19,8 @@ export const DebugTimeline = memo(function DebugTimeline({
   onJumpToEnd,
   onReset,
   onTogglePlay,
+  onPrevBreakpoint,
+  onNextBreakpoint,
   isPlaying = false,
   playSpeed = 1,
   onSpeedChange,
@@ -33,7 +35,10 @@ export const DebugTimeline = memo(function DebugTimeline({
   // Keyboard controls for the timeline
   useEffect(() => {
     const handler = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      const t = e.target;
+      // Don't hijack keys while the user is typing (inputs, Monaco editor, contenteditable)
+      if (t?.closest?.('input, textarea, select, [contenteditable="true"], .monaco-editor')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key) {
         case 'ArrowLeft':
@@ -138,6 +143,20 @@ export const DebugTimeline = memo(function DebugTimeline({
           >
             <ChevronsRight size={14} />
           </button>
+
+          {breakpoints.size > 0 && (
+            <>
+              <div className="dtl-divider" />
+              <button onClick={onPrevBreakpoint} className="dtl-btn" title="Previous breakpoint hit (Shift+F8)">
+                <CircleDot size={12} style={{ transform: 'scaleX(-1)' }} />
+                <SkipBack size={10} />
+              </button>
+              <button onClick={onNextBreakpoint} className="dtl-btn" title="Next breakpoint hit (F8)">
+                <CircleDot size={12} />
+                <SkipForward size={10} />
+              </button>
+            </>
+          )}
 
           <div className="dtl-divider" />
 
