@@ -176,8 +176,23 @@ Safari lacks `credentialless`, so there the page isn't isolated and input falls 
   focused tab, Enter/Space, middle-click; editor area is the labelled tabpanel. (Ctrl+W is reserved by browsers.)
 - Verification: lint clean · unit 88/88 · E2E 52/52 (twice).
 
+## Phase 10 — Accessibility pass (branch `phase-10`)
+
+- [x] **axe-core audit → zero violations** on welcome, editor + console, AI and Packages panels, Settings, the
+  GitHub dialog and the command palette. Fixed: muted-text contrast (~2.6:1 → ≥4.5:1 per theme), Run button
+  contrast, a button nested inside `role="tab"`, an unfocusable scrolling console, unlabelled Settings controls,
+  missing landmarks / `h1` / heading order, dialog semantics for the palette, colour-only links.
+  The audit now runs in the E2E suite.
+- [x] **File tree keyboard navigation** (WAI-ARIA tree, roving tabindex, ↑/↓/←/→/Home/End/Enter) and visible
+  focus rings.
+- [x] **Dialog focus management** (`useDialog`): focus in on open, Tab trapped, Escape closes, focus returns.
+- Verification: lint clean · unit 92/92 · E2E 55/55 (twice).
+
+Not done: visual-regression snapshots — font rendering differs between Windows dev machines and the Linux CI
+runner, so pixel diffs would be noisy.
+
 ## Ideas for a later phase
 
-- Accessibility pass on the remaining panels (file tree keyboard navigation, focus traps in modals).
-- Visual regression snapshots for the main layouts in CI.
+- Screen-reader announcements for run results (polite live region summarising "Completed in 12 ms" / errors).
+- Reduced-motion support (`prefers-reduced-motion` → disable framer-motion transitions).
 - Restore a Supabase project for production sign-in and cloud workspaces (**[YOU]**, dashboard).
