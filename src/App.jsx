@@ -197,8 +197,14 @@ export default function App() {
   const [authOpen, setAuthOpen]       = useState(false);
 
   // ── Code execution ───────────────────────────────────────────────
-  const { output: jsOutput, status: jsStatus, runCode: runJs, stop: stopJs, clearOutput: clearJs, addConsoleMessage } = useCodeRunner();
-  const { output: pyOutput, status: pyStatus, runPython, stopPython, clearOutput: clearPy } = usePython();
+  const {
+    output: jsOutput, status: jsStatus, runCode: runJs, stop: stopJs, clearOutput: clearJs, addConsoleMessage,
+    inputRequest: jsInputRequest, submitInput: submitJsInput, endInput: endJsInput,
+  } = useCodeRunner();
+  const {
+    output: pyOutput, status: pyStatus, runPython, stopPython, clearOutput: clearPy,
+    inputRequest: pyInputRequest, submitInput: submitPyInput, endInput: endPyInput,
+  } = usePython();
 
   const isPythonTab = activeTab?.lang === 'python';
   const consoleOutput = isPythonTab ? pyOutput : jsOutput;
@@ -775,7 +781,17 @@ export default function App() {
                     onClose={() => setBottomPanel(null)}
                   />
                 )}
-                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} stdin={stdinText} onStdinChange={setStdinText} />}
+                {bottomPanel === 'console' && (
+                  <ConsoleOutput
+                    lines={consoleOutput}
+                    onClear={clearConsole}
+                    stdin={stdinText}
+                    onStdinChange={setStdinText}
+                    inputRequest={isPythonTab ? pyInputRequest : jsInputRequest}
+                    onSubmitInput={isPythonTab ? submitPyInput : submitJsInput}
+                    onEndInput={isPythonTab ? endPyInput : endJsInput}
+                  />
+                )}
               </div>
             </div>
           )}

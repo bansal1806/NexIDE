@@ -4,7 +4,39 @@ import { Trash2, Terminal, Keyboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { stdinLines } from '../runtime/output';
 
-export function ConsoleOutput({ lines, onClear, stdin = '', onStdinChange }) {
+// Shown while the running program waits in input() / prompt()
+function InputPrompt({ request, onSubmit, onEof }) {
+  const [value, setValue] = useState('');
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); onSubmit(value); setValue(''); }
+    else if (e.key === 'd' && e.ctrlKey) { e.preventDefault(); onEof(); }
+  };
+  return (
+    <div className="console-line console-input-row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span className="console-line-prefix" aria-hidden="true">⌨</span>
+      {request.prompt && <pre className="console-line-text" style={{ margin: 0 }}>{request.prompt}</pre>}
+      <input
+        id="console-input-line"
+        autoFocus
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        aria-label={`Program input${request.prompt ? `: ${request.prompt}` : ''}`}
+        placeholder="type input, Enter to send · Ctrl+D for EOF"
+        spellCheck={false}
+        autoComplete="off"
+        style={{
+          flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
+          borderBottom: '1px solid var(--accent-cyan)', color: 'var(--text-primary)',
+          fontFamily: 'var(--font-mono)', fontSize: 12, padding: '2px 0',
+        }}
+      />
+      <button className="btn-clear" onClick={onEof} title="End of input (Ctrl+D)" id="btn-console-eof">EOF</button>
+    </div>
+  );
+}
+
+export function ConsoleOutput({ lines, onClear, stdin = '', onStdinChange, inputRequest = null, onSubmitInput, onEndInput }) {
   const bottomRef = useRef(null);
   const [showInput, setShowInput] = useState(!!stdin);
   const inputCount = stdinLines(stdin).length;
@@ -97,6 +129,9 @@ export function ConsoleOutput({ lines, onClear, stdin = '', onStdinChange }) {
               </motion.div>
             ))}
           </AnimatePresence>
+        )}
+        {inputRequest && onSubmitInput && (
+          <InputPrompt request={inputRequest} onSubmit={onSubmitInput} onEof={onEndInput} />
         )}
         <div ref={bottomRef} />
       </div>

@@ -87,6 +87,8 @@ try {
 
   // ── JavaScript ──
   await openTemplate('js');
+  check('Page is cross-origin isolated (SharedArrayBuffer available)',
+    await page.evaluate(() => self.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function'));
 
   // Legacy plaintext key (seeded above) is migrated to encrypted storage
   await page.waitForFunction(() => !!localStorage.getItem('nexide:secrets'), null, { timeout: 5000 }).catch(() => {});
@@ -152,6 +154,23 @@ try {
   await run();
   check('stdin: JS prompt() reads Input lines', await waitConsole(/Name\? Ada[\s\S]*Age\? 36[\s\S]*hi Ada, next year 37/));
   await setStdin('');
+
+  await setCode(`console.log('before');\nconst color = prompt('Color? ');\nconsole.log('picked ' + color);`);
+  await run();
+  await page.waitForSelector('#console-input-line', { timeout: 10000 }).catch(() => {});
+  const shownBefore = /before/.test(await consoleText());
+  await page.fill('#console-input-line', 'teal').catch(() => {});
+  await page.press('#console-input-line', 'Enter').catch(() => {});
+  check('stdin: JS interactive prompt() (output shown first)', shownBefore && await waitConsole(/Color\? teal[\s\S]*picked teal/, 10000));
+
+  // Stop works while a program is blocked waiting for input
+  await setCode(`prompt('waiting forever? ');`);
+  await run();
+  await page.waitForSelector('#console-input-line', { timeout: 10000 }).catch(() => {});
+  await run(); // "Stop"
+  const stoppedWhileWaiting = await waitConsole(/stopped by user/, 5000);
+  const promptGone = !(await page.locator('#console-input-line').isVisible().catch(() => false));
+  check('stdin: Stop while waiting for input', stoppedWhileWaiting && promptGone);
 
   // ── Debugger ──
   await setCode(`const a = 1;\nconst b = 2;\nfunction add(x, y) {\n  const s = x + y;\n  return s;\n}\nconsole.log(add(a, b));`);
@@ -228,14 +247,31 @@ try {
   await run();
   check('Python: runs via Pyodide', await waitConsole(/nums \[0, 1, 4, 9\]/, 90000));
 
+  // Pre-filled lines are used first; when they run out the program asks interactively
   await setStdin('Grace\n');
   await setCode(`name = input("Who? ")\nprint(f"hello {name}")\ninput("again? ")`);
   await run();
+  const askedAgain = await page.waitForSelector('#console-input-line', { timeout: 30000 }).then(() => true, () => false);
+  await page.click('#btn-console-eof');
   await waitConsole(/EOFError/, 30000);
   const stdinOut = await consoleText();
   check('stdin: Python input() echoes like a terminal', /Who\? Grace/.test(stdinOut) && /hello Grace/.test(stdinOut));
-  check('stdin: running out of input explains the Input box', /EOFError[\s\S]*Input box/.test(stdinOut));
+  check('stdin: asks interactively after pre-filled lines; EOF explains', askedAgain && /EOFError[\s\S]*Input box/.test(stdinOut));
   await setStdin('');
+
+  // Fully interactive: type answers while the program waits
+  await setCode(`name = input("Name? ")\nage = int(input("Age? "))\nprint(f"{name} will be {age + 1}")`);
+  await run();
+  for (const answer of ['Ada', '36']) {
+    await page.waitForSelector('#console-input-line', { timeout: 30000 });
+    await page.fill('#console-input-line', answer);
+    await page.press('#console-input-line', 'Enter');
+    await page.waitForTimeout(200);
+  }
+  await waitConsole(/Ada will be 37/, 15000);
+  const interactiveOut = await consoleText();
+  check('stdin: Python interactive input() (typed while waiting)',
+    /Name\? Ada/.test(interactiveOut) && /Age\? 36/.test(interactiveOut) && /Ada will be 37/.test(interactiveOut));
 
   await setCode(`import numpy as np\nprint("numpy sum", int(np.arange(5).sum()))`);
   await run();
@@ -306,6 +342,17 @@ try {
     await ws.close();
     rmSync(dir, { recursive: true, force: true });
   }
+
+  // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
+  await openTemplate('py');
+  await setCode('print("first")');
+  await run();
+  await waitConsole(/✓ Completed/, 90000);
+  await setCode('print("second")');
+  await run();
+  await waitConsole(/✓ Completed/, 30000);
+  const secondRun = await consoleText();
+  check('Python: repeated runs rebuild the workspace cleanly', /second/.test(secondRun) && !/Resource busy|Could not load workspace/.test(secondRun));
 
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));

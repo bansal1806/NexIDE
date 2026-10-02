@@ -4,6 +4,7 @@
 import { executeJs } from './executeJs';
 import { transpileTS } from './transpile';
 import { lockdownWorkerScope } from './lockdown';
+import { readStdinBlocking } from './stdinChannel';
 
 // Before any user code can run (each run gets a fresh worker)
 lockdownWorkerScope(self);
@@ -29,10 +30,20 @@ self.onmessage = async (event) => {
   const { type, id, code, language, debug, maxSteps, path, files } = event.data || {};
   if (type !== 'run') return;
 
-  // Program input for prompt(): one line per call, echoed like a terminal; null at EOF
+  // Program input for prompt(): pre-filled Input-box lines first, then (when the page is
+  // cross-origin isolated) ask interactively and block until answered. Echoed like a terminal.
   const stdinLines = Array.isArray(event.data.stdin) ? event.data.stdin.slice() : [];
+  const stdinSab = event.data.stdinSab || null;
   self.prompt = (message = '') => {
-    const value = stdinLines.length ? String(stdinLines.shift()) : null;
+    let value = null;
+    if (stdinLines.length) {
+      value = String(stdinLines.shift());
+    } else if (stdinSab) {
+      value = readStdinBlocking(stdinSab, () => {
+        flushLogs(); // show earlier output before the question
+        self.postMessage({ type: 'stdin-request', runId: id, prompt: String(message) });
+      });
+    }
     onLog('log', `${message}${value ?? '(no input)'}`);
     return value;
   };
