@@ -386,7 +386,7 @@ export default function App() {
   const workspaceKey = cloudMode ? `cloud:${activeProjectId}`
     : githubMode ? `github:${githubInfo?.owner}/${githubInfo?.repo}`
     : fs.rootName ? `local:${fs.rootName}` : 'scratch';
-  const { lockFor, savePins, clearPins: clearWorkspacePins } = usePackageLocks();
+  const { lockFor, savePins, clearPins: clearWorkspacePins, unpin } = usePackageLocks();
   const clearPins = useCallback(() => {
     clearWorkspacePins(workspaceKey);
     notify('info', 'npm packages will resolve to their latest versions on the next run.');
@@ -762,6 +762,12 @@ export default function App() {
               onApiKeyNeeded: () => setSettingsOpen(true),
             }}
             map={{ activeTab, fileTree, onNodeClick: handleMapNodeClick }}
+            packages={{
+              workspaceLabel: rootName || 'Scratch files',
+              pins: lockFor(workspaceKey),
+              onUnpin: (spec) => unpin(workspaceKey, spec),
+              onUpdateAll: clearPins,
+            }}
             debug={{
               snapshot: currentSnapshot,
               previousSnapshot,

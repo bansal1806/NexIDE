@@ -219,6 +219,23 @@ try {
   await setCode(`import { capitalize, chunk } from 'lodash-es';\nimport dayjs from 'dayjs';\nconsole.log('npm', capitalize('nexide'), JSON.stringify(chunk([1, 2, 3, 4], 2)), dayjs('2026-01-02').format('YYYY/MM/DD'));`);
   await run();
   check('JS: npm packages via esm.sh (named + default imports)', await waitConsole(/npm Nexide \[\[1,2\],\[3,4\]\] 2026\/01\/02/, 30000));
+
+  // Packages panel lists the workspace's pins; unpinning re-resolves on the next run
+  if (!(await page.locator('.right-panel').isVisible().catch(() => false))) await page.click('#btn-toggle-ai');
+  await page.click('.right-panel .panel-tab:has-text("Packages")');
+  const pinRows = page.locator('#packages-panel .package-row');
+  await pinRows.first().waitFor({ timeout: 10000 }).catch(() => {});
+  const listed = await pinRows.allInnerTexts();
+  const listsPins = listed.some(t => /lodash-es[\s\S]*lodash-es@\d/.test(t)) && listed.some(t => /dayjs[\s\S]*dayjs@\d/.test(t));
+  await page.click('#packages-panel .package-row[data-spec="lodash-es"] button:has-text("Unpin")');
+  await page.waitForFunction(() => !JSON.parse(localStorage.getItem('nexide:npm-lock') || '{}').scratch?.['lodash-es'], null, { timeout: 5000 }).catch(() => {});
+  const afterUnpin = await page.evaluate(() => JSON.parse(localStorage.getItem('nexide:npm-lock') || '{}').scratch || {});
+  await run();
+  const repinned = await waitConsole(/lodash-es → lodash-es@[\d.]+ \(pinned/, 30000);
+  check('Packages panel: lists pins; Unpin re-resolves on the next run',
+    listsPins && !afterUnpin['lodash-es'] && !!afterUnpin.dayjs && repinned,
+    `listed=${listsPins} unpinned=${!afterUnpin['lodash-es']} kept=${!!afterUnpin.dayjs} repinned=${repinned}`);
+  await page.click('.right-panel .panel-close-btn');
   await page.selectOption('#language-select', 'typescript');
 
   // The bundled TS language worker runs under the strict CSP: a type error yields a marker

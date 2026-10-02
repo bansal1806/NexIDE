@@ -27,5 +27,15 @@ export function usePackageLocks() {
     });
   }, [setLocks]);
 
-  return { lockFor, savePins, clearPins };
+  // Drop one pin: that package re-resolves to its latest version on the next run
+  const unpin = useCallback((workspaceKey, spec) => {
+    setLocks(prev => {
+      if (!prev[workspaceKey]?.[spec]) return prev;
+      const pins = { ...prev[workspaceKey] };
+      delete pins[spec];
+      return { ...prev, [workspaceKey]: pins };
+    });
+  }, [setLocks]);
+
+  return { lockFor, savePins, clearPins, unpin };
 }
