@@ -346,7 +346,8 @@ try {
     const stepInto = async (fileName) => {
       await ws.click('#btn-debug-code');
       await ws.waitForSelector('#debug-timeline', { timeout: 30000 });
-      await wsConsole(/✓ Completed|Recorded/, 60000);
+      // Done when the Run button is back from "Stop" (console text may be from an earlier run)
+      await ws.waitForFunction(() => document.querySelector('#btn-run-code')?.innerText.trim() === 'Run', null, { timeout: 60000 });
       await ws.click('button[title="Jump to Start (Home)"]');
       const total = Number(await ws.locator('.dtl-step-total').innerText());
       for (let i = 0; i < total; i++) {
@@ -457,14 +458,17 @@ try {
 
   // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
   await openTemplate('py');
-  await setCode('print("first")');
+  await setCode('print("first-run")');
   await run();
-  await waitConsole(/✓ Completed/, 90000);
-  await setCode('print("second")');
+  await waitConsole(/first-run[\s\S]*✓ Completed/, 90000);
+  await setCode('print("second-run")');
   await run();
-  await waitConsole(/✓ Completed/, 30000);
+  // Wait for *this* run's output — "✓ Completed" from the first run may still be on screen
+  const secondDone = await waitConsole(/second-run[\s\S]*(✓ Completed|✗)/, 60000);
   const secondRun = await consoleText();
-  check('Python: repeated runs rebuild the workspace cleanly', /second/.test(secondRun) && !/Resource busy|Could not load workspace/.test(secondRun));
+  check('Python: repeated runs rebuild the workspace cleanly',
+    secondDone && !/first-run/.test(secondRun) && !/Resource busy|Could not load workspace/.test(secondRun),
+    secondDone ? '' : `console: ${secondRun.replace(/\s+/g, ' ').slice(0, 200)}`);
 
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));
