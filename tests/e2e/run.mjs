@@ -382,6 +382,7 @@ try {
     const jsInput = await ws.inputValue('#console-stdin');
     await ws.click('.file-tree-item[title="main.py"]');
     const pyInput = await ws.inputValue('#console-stdin');
+    await ws.waitForFunction(() => JSON.parse(localStorage.getItem('nexide:stdin') || '{}')['main.py'] === 'for-python', null, { timeout: 5000 }).catch(() => {});
     const stored = await ws.evaluate(() => JSON.parse(localStorage.getItem('nexide:stdin') || '{}'));
     check('stdin: Input box is per file and remembered', jsInput === '' && pyInput === 'for-python' && stored['main.py'] === 'for-python',
       `js=${JSON.stringify(jsInput)} py=${JSON.stringify(pyInput)}`);
@@ -450,6 +451,11 @@ try {
       await off.evaluate((c) => window.monaco.editor.getEditors()[0].setValue(c), npmCode);
       await off.click('#btn-run-code');
       const pinnedOnline = await offConsole(/lodash-es → lodash-es@[\d.]+ \(pinned[\s\S]*npm-offline Works/, 30000);
+      // The pin is persisted just after the run resolves (state → effect → localStorage), so wait for it
+      await off.waitForFunction(
+        () => !!JSON.parse(localStorage.getItem('nexide:npm-lock') || '{}').scratch?.['lodash-es'],
+        null, { timeout: 10000 }
+      ).catch(() => {});
       const lock = await off.evaluate(() => JSON.parse(localStorage.getItem('nexide:npm-lock') || '{}').scratch || {});
       check('npm: unversioned import is pinned for the workspace', pinnedOnline && /^lodash-es@\d/.test(lock['lodash-es'] || ''), JSON.stringify(lock));
 
