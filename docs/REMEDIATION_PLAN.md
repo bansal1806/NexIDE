@@ -159,8 +159,16 @@ Safari lacks `credentialless`, so there the page isn't isolated and input falls 
   and shortcuts are hooks; terminal/console and preview/AI/map/debug panels are components. No behaviour change.
 - Verification: lint clean · unit 74/74 · E2E 50/50 (incl. pin, then run the package offline).
 
+## Phase 8 — Packages panel, useWorkspace (branch `phase-8`)
+
+- [x] **Packages panel**: a right-panel tab listing the workspace's pinned npm packages (spec → exact build),
+  with npm links, per-package Unpin and Update all.
+- [x] **`useWorkspace`**: tabs, opening/editing/saving/closing files and switching between local folders,
+  GitHub repos and cloud projects moved out of `App.jsx` (818 → 491 lines; 989 before Phase 7). No behaviour change.
+- Verification: lint clean · unit 74/74 · E2E 51/51.
+
 ## Ideas for a later phase
 
-- Extract tab/workspace management from `App.jsx` into a `useWorkspace` hook (the largest remaining block).
-- Show the workspace's pinned packages (and let users edit them) in a small panel.
+- Unit tests for `useWorkspace` with a fake file system (today it is covered end-to-end only).
+- Keyboard-accessible tab bar (arrow keys between tabs, Ctrl+W to close).
 - Restore a Supabase project for production sign-in and cloud workspaces (**[YOU]**, dashboard).
