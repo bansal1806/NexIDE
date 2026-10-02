@@ -191,8 +191,21 @@ Safari lacks `credentialless`, so there the page isn't isolated and input falls 
 Not done: visual-regression snapshots — font rendering differs between Windows dev machines and the Linux CI
 runner, so pixel diffs would be noisy.
 
+## Phase 11 — "Playground" UI/UX redesign ✅
+
+- [x] New design language: chunky ink outlines, hard offset shadows, candy accents, pill shapes, dotted canvas,
+  Fredoka / Space Grotesk / JetBrains Mono. Tokens in `src/index.css`, component layer in `src/styles/playground.css`.
+- [x] Four themes rebuilt and contrast-checked (≥ 4.5:1): Playground, Lagoon, Sunset, Classic (ids unchanged).
+- [x] Micro-animations: squishy buttons, striped "running" Run button, bouncing tabs, floaties on the welcome
+  screen, confetti on the first successful run (and after fixing an error).
+- [x] Reduced motion: CSS `prefers-reduced-motion` block + framer-motion `MotionConfig reducedMotion="user"`;
+  confetti is skipped.
+- [x] Layout fixes: editor no longer collapses when the console opens; the time-travel timeline sits under the
+  editor instead of squeezing a third column; right-panel tabs no longer truncate.
+- [x] New welcome screen (template cards, open folder / GitHub, shortcut chips).
+- Verification: lint clean · unit 92/92 · E2E 55/55 (twice, incl. axe).
+
 ## Ideas for a later phase
 
 - Screen-reader announcements for run results (polite live region summarising "Completed in 12 ms" / errors).
-- Reduced-motion support (`prefers-reduced-motion` → disable framer-motion transitions).
 - Restore a Supabase project for production sign-in and cloud workspaces (**[YOU]**, dashboard).
