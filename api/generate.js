@@ -1,32 +1,17 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_MODEL, SYSTEM_INSTRUCTION, buildContents, validateRequest } from '../src/shared/gemini.js';
+import { rateLimiterFromEnv } from './_lib/rateLimit.js';
 
 /**
  * System-key Gemini proxy.
  *
  * Users with their own key call Gemini directly from the browser, so their key never
  * reaches this server. This endpoint only serves signed-in users, using GEMINI_API_KEY,
- * with input limits and a per-user rate limit.
+ * with input limits and per-user rate limits (shared via Upstash/Vercel KV when configured).
  */
 
-const RATE_LIMIT = Number(process.env.AI_RATE_LIMIT_PER_MINUTE) || 10;
-const WINDOW_MS = 60_000;
-// Best-effort, per serverless instance. Use a shared store (e.g. Upstash) for a hard limit.
-const hits = new Map();
-
-function rateLimited(userId) {
-  const now = Date.now();
-  const recent = (hits.get(userId) || []).filter(t => now - t < WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) {
-    hits.set(userId, recent);
-    return true;
-  }
-  recent.push(now);
-  hits.set(userId, recent);
-  if (hits.size > 10_000) hits.clear();
-  return false;
-}
+const limiter = rateLimiterFromEnv();
 
 let supabaseAdminless = null;
 function supabaseClient() {
@@ -70,9 +55,15 @@ export default async function handler(req, res) {
     });
   }
 
-  if (rateLimited(user.id)) {
-    res.setHeader('Retry-After', '60');
-    return res.status(429).json({ error: `Rate limit: ${RATE_LIMIT} requests per minute.`, code: 'RATE_LIMITED' });
+  const limit = await limiter.check(user.id);
+  if (!limit.allowed) {
+    res.setHeader('Retry-After', String(limit.retryAfterSec));
+    return res.status(429).json({
+      error: limit.reason === 'day'
+        ? 'Daily built-in AI quota reached. Add your own Gemini API key in Settings to keep going.'
+        : 'Too many requests — please wait a moment.',
+      code: 'RATE_LIMITED',
+    });
   }
 
   const body = req.body && typeof req.body === 'object' ? req.body : {};
