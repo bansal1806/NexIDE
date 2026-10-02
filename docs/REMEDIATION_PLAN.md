@@ -76,7 +76,7 @@ Items marked **[YOU]** need dashboard access and cannot be done from code.
   code lenses, preview, Python run/traceback/debug/Stop, no page errors; in-editor Ctrl+Enter runs the latest edit.
 - Production bundle contains no `service_role` JWT.
 
-# Phase 2 — Defense in depth
+## Phase 2 — Defense in depth
 
 - [x] **E2E in repo**: `npm run test:e2e` builds, serves the production bundle under the real
   `vercel.json` headers, and drives local Edge/Chrome (playwright-core) — 27 checks.
