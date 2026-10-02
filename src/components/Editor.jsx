@@ -12,38 +12,47 @@ const MONACO_THEMES = {
   crimson: 'nexide-crimson',
 };
 
+// Playground syntax colours — all ≥ 4.5:1 on every theme's editor background
 const BASE_RULES = [
-  { token: 'comment',    foreground: '868ba4', fontStyle: 'italic' },
-  { token: 'keyword',    foreground: 'a855f7', fontStyle: 'bold' },
-  { token: 'string',     foreground: '6ee7b7' },
-  { token: 'number',     foreground: 'f97316' },
-  { token: 'delimiter',  foreground: '8b8fa8' },
-  { token: 'variable',   foreground: '00d4ff' },
-  { token: 'type',       foreground: 'fbbf24' },
-  { token: 'function',   foreground: '00d4ff' },
-  { token: 'identifier', foreground: 'e2e4ef' },
+  { token: 'comment',    foreground: 'ada3c9', fontStyle: 'italic' },
+  { token: 'keyword',    foreground: 'ff9ad1', fontStyle: 'bold' },
+  { token: 'string',     foreground: '7df2c6' },
+  { token: 'number',     foreground: 'ffb98f' },
+  { token: 'regexp',     foreground: 'ffb98f' },
+  { token: 'delimiter',  foreground: 'cfc6e6' },
+  { token: 'variable',   foreground: '8fd8ff' },
+  { token: 'type',       foreground: 'ffe27a' },
+  { token: 'function',   foreground: '8fd8ff' },
+  { token: 'identifier', foreground: 'f7f3ff' },
 ];
 
-function themeColors(bg, surface, border, accent) {
+function themeColors({ bg, line, border, accent, fg, gutter }) {
   return {
     'editor.background':           bg,
-    'editor.foreground':           '#e2e4ef',
-    'editorLineNumber.foreground': '#3d3f57',
-    'editorLineNumber.activeForeground': '#8b8fa8',
-    'editor.selectionBackground':  `${accent}33`,
-    'editor.lineHighlightBackground': surface,
+    'editor.foreground':           fg,
+    'editorLineNumber.foreground': gutter,
+    'editorLineNumber.activeForeground': fg,
+    'editor.selectionBackground':  `${accent}40`,
+    'editor.inactiveSelectionBackground': `${accent}26`,
+    'editor.lineHighlightBackground': line,
+    'editor.lineHighlightBorder':  line,
     'editorCursor.foreground':     accent,
-    'editor.findMatchBackground':  `${accent}33`,
-    'editorWidget.background':     surface,
+    'editor.findMatchBackground':  `${accent}4d`,
+    'editorWidget.background':     line,
     'editorWidget.border':         border,
-    'input.background':            surface,
+    'editorSuggestWidget.background': line,
+    'editorSuggestWidget.border':  border,
+    'editorSuggestWidget.selectedBackground': `${accent}33`,
+    'input.background':            line,
     'input.border':                border,
     'focusBorder':                 accent,
-    'scrollbarSlider.background':  `${border}66`,
-    'scrollbarSlider.hoverBackground': '#3d3f5766',
+    'scrollbarSlider.background':  `${border}88`,
+    'scrollbarSlider.hoverBackground': `${border}cc`,
     'editorGutter.background':     bg,
     'editorIndentGuide.background1': border,
-    'editorIndentGuide.activeBackground1': '#3d3f57',
+    'editorIndentGuide.activeBackground1': gutter,
+    'editorBracketMatch.background': `${accent}33`,
+    'editorBracketMatch.border':   accent,
   };
 }
 
@@ -177,15 +186,15 @@ export function Editor({
   function handleEditorWillMount(monaco) {
     monaco.editor.defineTheme('nexide-dark', {
       base: 'vs-dark', inherit: true, rules: BASE_RULES,
-      colors: themeColors('#0d0e14', '#13141c', '#2a2b3d', '#00d4ff'),
+      colors: themeColors({ bg: '#241f33', line: '#2e2841', border: '#3f3856', accent: '#c9b0ff', fg: '#f7f3ff', gutter: '#a69cc4' }),
     });
     monaco.editor.defineTheme('nexide-aurora', {
       base: 'vs-dark', inherit: true, rules: BASE_RULES,
-      colors: themeColors('#0a0b12', '#12101e', '#2d2442', '#5eead4'),
+      colors: themeColors({ bg: '#162829', line: '#1e3334', border: '#2e4a4b', accent: '#7fe3f0', fg: '#effbf8', gutter: '#8fb8b1' }),
     });
     monaco.editor.defineTheme('nexide-crimson', {
       base: 'vs-dark', inherit: true, rules: BASE_RULES,
-      colors: themeColors('#120a0a', '#1c0f0f', '#422424', '#fca5a5'),
+      colors: themeColors({ bg: '#2c1c1f', line: '#372428', border: '#4d3337', accent: '#ffb07a', fg: '#fff3ee', gutter: '#c09a8f' }),
     });
   }
 

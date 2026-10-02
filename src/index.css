@@ -1,6 +1,8 @@
 /* =====================================================
-   NexIDE — Global Design System
-   Dark IDE theme with cyan/violet accents
+   NexIDE — "Playground" design system
+   Neo-brutalist & playful: chunky ink outlines, hard offset shadows,
+   candy accents, springy motion. Every text colour is ≥ 4.5:1 (WCAG AA)
+   on the surfaces it sits on (see docs/DESIGN.md).
    ===================================================== */
 
 *, *::before, *::after {
@@ -10,54 +12,65 @@
 }
 
 :root {
-  /* Color Palette */
-  --bg-base:       #0d0e14;
-  --bg-surface:    #13141c;
-  --bg-elevated:   #1a1b26;
-  --bg-overlay:    #1f2030;
-  --bg-input:      #0f1018;
+  /* Surfaces: canvas → card → raised → hover */
+  --bg-base:       #1b1726;
+  --bg-surface:    #241f33;
+  --bg-elevated:   #2e2841;
+  --bg-overlay:    #38314e;
+  --bg-input:      #1e1a2b;
 
-  --border:        #2a2b3d;
-  --border-strong: #3d3f57;
+  /* Ink: outlines and hard shadows */
+  --ink:           #0d0b13;
+  --border:        #3f3856;   /* internal dividers */
+  --border-strong: #5b5279;
 
-  --text-primary:  #e2e4ef;
-  --text-secondary:#8b8fa8;
-  --text-muted:    #868ba4; /* ≥4.5:1 on every surface (WCAG AA) */
-  --text-heading:  #f0f1fa;
+  --text-primary:  #f7f3ff;
+  --text-secondary:#cfc6e6;
+  --text-muted:    #ada3c9;
+  --text-heading:  #ffffff;
 
-  --accent-cyan:   #00d4ff;
-  --accent-violet: #7c3aed;
-  --accent-purple: #a855f7;
-  --accent-green:  #10b981;
-  --accent-red:    #ef4444;
-  --accent-yellow: #f59e0b;
-  --accent-orange: #f97316;
+  /* Candy accents (also readable as text on every surface) */
+  --accent-cyan:   #8fd8ff;   /* sky */
+  --accent-violet: #c9b0ff;   /* lilac */
+  --accent-purple: #c9b0ff;
+  --accent-green:  #7df2c6;   /* mint */
+  --accent-red:    #ff8a9b;   /* strawberry */
+  --accent-yellow: #ffe27a;   /* lemon */
+  --accent-orange: #ffb98f;   /* peach */
+  --accent-pink:   #ff9ad1;   /* bubblegum */
+  --accent-primary:var(--accent-violet);
 
-  /* Gradients */
-  --gradient-brand: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
-  --gradient-glow:  radial-gradient(circle at center, rgba(0, 212, 255, 0.15) 0%, transparent 70%);
-  --gradient-surface: linear-gradient(180deg, #1a1b26 0%, #13141c 100%);
+  --gradient-brand: linear-gradient(120deg, #7df2c6 0%, #8fd8ff 35%, #c9b0ff 70%, #ff9ad1 100%);
+  --gradient-glow:  radial-gradient(circle at center, rgba(201, 176, 255, 0.16) 0%, transparent 70%);
+  --gradient-surface: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-surface) 100%);
 
-  /* Shadows */
-  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.5);
-  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-lg:  0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-glow-cyan:   0 0 20px rgba(0, 212, 255, 0.25);
-  --shadow-glow-violet: 0 0 20px rgba(124, 58, 237, 0.35);
+  /* Neo-brutalist depth */
+  --outline:    2px solid var(--ink);
+  --shadow-sm:  2px 2px 0 var(--ink);
+  --shadow-md:  4px 4px 0 var(--ink);
+  --shadow-lg:  6px 6px 0 var(--ink);
+  --shadow-glow-cyan:   4px 4px 0 var(--ink);
+  --shadow-glow-violet: 4px 4px 0 var(--ink);
+
+  /* Canvas texture */
+  --dot: rgba(201, 176, 255, 0.09);
 
   /* Typography */
-  --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono:  'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  --font-sans:    'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Fredoka', 'Space Grotesk', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
 
-  /* Spacing & Radii */
-  --radius-sm:  2px;
-  --radius-md:  4px;
-  --radius-lg:  6px;
+  /* Radii */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  14px;
+  --radius-pill: 999px;
 
-  /* Transitions */
+  /* Motion */
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.27, 1.55);
   --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
-  --duration:    200ms;
+  --duration:    180ms;
 }
 
 html, body {
@@ -81,112 +94,145 @@ html, body {
   flex-direction: column;
 }
 
-/* Themes */
+/* ── Themes (Settings → Appearance). Ids kept for saved settings. ── */
+
+/* "Lagoon" — teal ink, mint & sky */
 [data-theme="aurora"] {
-  --text-muted:    #8a84a8;
-  --bg-base:       #0a0b12;
-  --bg-surface:    #12101e;
-  --bg-elevated:   #181526;
-  --bg-overlay:    #1e1930;
-  --border:        #2d2442;
-  --border-strong: #453463;
-  --accent-cyan:   #5eead4;
-  --accent-violet: #d946ef;
-  --gradient-brand: linear-gradient(135deg, #d946ef 0%, #0ea5e9 100%);
-  --shadow-glow-cyan: 0 0 20px rgba(94, 234, 212, 0.25);
+  --bg-base:       #0f1d1e;
+  --bg-surface:    #162829;
+  --bg-elevated:   #1e3334;
+  --bg-overlay:    #273e3f;
+  --bg-input:      #122223;
+  --ink:           #071011;
+  --border:        #2e4a4b;
+  --border-strong: #46686a;
+  --text-primary:  #effbf8;
+  --text-secondary:#c3e2dc;
+  --text-muted:    #9cc4bd;
+  --accent-cyan:   #7fe3f0;
+  --accent-violet: #b9c4ff;
+  --accent-purple: #b9c4ff;
+  --accent-green:  #86f0c8;
+  --accent-red:    #ff9a9a;
+  --accent-yellow: #f6e58d;
+  --accent-orange: #ffc28f;
+  --accent-pink:   #ffa3c8;
+  --gradient-brand: linear-gradient(120deg, #86f0c8 0%, #7fe3f0 50%, #b9c4ff 100%);
+  --dot: rgba(127, 227, 240, 0.08);
 }
 
+/* "Sunset" — warm ink, peach & bubblegum */
 [data-theme="crimson"] {
-  --text-muted:    #a88a8a;
-  --bg-base:       #120a0a;
-  --bg-surface:    #1c0f0f;
-  --bg-elevated:   #261515;
-  --bg-overlay:    #301a1a;
-  --border:        #422424;
-  --border-strong: #633434;
-  --accent-cyan:   #fca5a5;
-  --accent-violet: #ef4444;
-  --gradient-brand: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
-  --shadow-glow-cyan: 0 0 20px rgba(252, 165, 165, 0.25);
+  --bg-base:       #211517;
+  --bg-surface:    #2c1c1f;
+  --bg-elevated:   #372428;
+  --bg-overlay:    #432c31;
+  --bg-input:      #251819;
+  --ink:           #120a0b;
+  --border:        #4d3337;
+  --border-strong: #6e4a50;
+  --text-primary:  #fff3ee;
+  --text-secondary:#ecd0c6;
+  --text-muted:    #c9a79c;
+  --accent-cyan:   #ffc9a8;
+  --accent-violet: #ffb0cc;
+  --accent-purple: #ffb0cc;
+  --accent-green:  #9fe8b8;
+  --accent-red:    #ff8f8f;
+  --accent-yellow: #ffd97a;
+  --accent-orange: #ffb07a;
+  --accent-pink:   #ff9fc0;
+  --gradient-brand: linear-gradient(120deg, #ffd97a 0%, #ffb07a 45%, #ff9fc0 100%);
+  --dot: rgba(255, 176, 122, 0.08);
 }
 
+/* "Classic" — calm greys, small shadows, for focus sessions */
 [data-theme="vs-dark"] {
-  --text-muted:    #9d9d9d;
   --bg-base:       #1e1e1e;
   --bg-surface:    #252526;
   --bg-elevated:   #2d2d30;
   --bg-overlay:    #3e3e42;
+  --bg-input:      #1f1f20;
+  --ink:           #111111;
   --border:        #3c3c3c;
-  --border-strong: #454545;
-  --accent-cyan:   #007acc;
-  --accent-violet: #007acc;
-  --gradient-brand: linear-gradient(135deg, #007acc 0%, #007acc 100%);
+  --border-strong: #555555;
+  --text-primary:  #e8e8e8;
+  --text-secondary:#c8c8c8;
+  --text-muted:    #b0b0b0;
+  --accent-cyan:   #75beff;
+  --accent-violet: #c5a5ff;
+  --accent-purple: #c5a5ff;
+  --accent-green:  #89d185;
+  --accent-red:    #f48771;
+  --accent-yellow: #e5c07b;
+  --accent-orange: #e8a86b;
+  --accent-pink:   #f0a0c8;
+  --gradient-brand: linear-gradient(120deg, #75beff 0%, #c5a5ff 100%);
+  --shadow-md: 2px 2px 0 var(--ink);
+  --shadow-lg: 3px 3px 0 var(--ink);
+  --dot: transparent;
 }
 
 .theme-selector {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
   margin-top: 6px;
 }
 
 .theme-option {
-  flex: 1;
-  min-width: 80px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   padding: 8px;
-  border: 1px solid var(--border);
+  border: var(--outline);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--duration);
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+  transition: transform var(--duration) var(--ease-spring), box-shadow var(--duration) var(--ease-spring);
 }
 
+.theme-option:hover { transform: translate(-1px, -1px); box-shadow: var(--shadow-md); }
+
 .theme-option.active {
-  border-color: var(--accent-cyan);
-  background: rgba(0, 212, 255, 0.05);
+  background: var(--accent-green);
+  color: var(--ink);
+  box-shadow: var(--shadow-md);
 }
 
 .theme-preview {
   width: 100%;
-  height: 24px;
-  border-radius: 4px;
+  height: 26px;
+  border-radius: 6px;
   background: var(--preview);
-  border: 1px solid var(--border-strong);
+  border: var(--outline);
 }
 
 /* Scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 3px;
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: padding-box; }
 
-/* Selection */
 ::selection {
-  background: rgba(0, 212, 255, 0.2);
-  color: var(--text-primary);
+  background: rgba(201, 176, 255, 0.35);
+  color: var(--text-heading);
 }
 
-/* Focus ring */
+/* Focus ring: chunky and impossible to miss */
 :focus-visible {
-  outline: 2px solid var(--accent-cyan);
+  outline: 2px solid var(--accent-yellow);
   outline-offset: 2px;
 }
 
-/* Utility classes */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -199,32 +245,30 @@ html, body {
   border: 0;
 }
 
-/* Animations */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
-}
+/* ── Animations ── */
+@keyframes pulse-glow { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes slide-in-right { from { transform: translateX(10px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+/* Playground motion vocabulary */
+@keyframes pg-pop      { 0% { transform: scale(0.92); opacity: 0; } 60% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes pg-drop     { 0% { transform: translateY(-10px) rotate(-1deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes pg-wiggle   { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+@keyframes pg-float    { 0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); } 50% { transform: translateY(-14px) rotate(calc(var(--r, 0deg) + 8deg)); } }
+@keyframes pg-stripes  { to { background-position: 28px 0; } }
+@keyframes pg-bounce-in { 0% { transform: translateY(6px) scale(0.96); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes pg-pulse-dot { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.45); } }
+@keyframes pg-shine    { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
 
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-@keyframes slide-in-right {
-  from { transform: translateX(10px); opacity: 0; }
-  to   { transform: translateX(0); opacity: 1; }
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-@keyframes shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position:  200% 0; }
+/* Respect the OS "reduce motion" setting everywhere */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
