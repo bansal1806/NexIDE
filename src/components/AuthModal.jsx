@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { useDialog } from '../hooks/useDialog';
 import { X, Mail, Lock, User, LogIn, UserPlus, Loader2, LogOut } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -10,6 +11,8 @@ export function AuthModal({ open, onClose }) {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
   const [message, setMessage]   = useState(null);
+  const panelRef = useRef(null);
+  useDialog(panelRef, { active: open, onClose });
 
   if (!open) return null;
 
@@ -51,7 +54,7 @@ export function AuthModal({ open, onClose }) {
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Authentication" onClick={onClose}>
-      <div className="modal-panel auth-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
+      <div className="modal-panel auth-panel" ref={panelRef} tabIndex={-1} onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
         <div className="modal-header">
           {user ? <User size={14} /> : (isLogin ? <LogIn size={14} /> : <UserPlus size={14} />)}
           <span>{user ? 'Account' : (isLogin ? 'Login' : 'Sign Up')}</span>

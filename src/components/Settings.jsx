@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
+import { useDialog } from '../hooks/useDialog';
 import { X, Key, Sliders, Type, Save, Eye, EyeOff } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
 
@@ -20,11 +21,8 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
   const [showKey, setShowKey]         = useState(false);
   const [showGhToken, setShowGhToken] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const panelRef = useRef(null);
+  useDialog(panelRef, { onClose });
 
   const update = (key, value) => setDraft(d => ({ ...d, [key]: value }));
 
@@ -35,7 +33,7 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Settings" id="settings-modal" onClick={onClose}>
-      <div className="modal-panel settings-panel" onClick={e => e.stopPropagation()}>
+      <div className="modal-panel settings-panel" ref={panelRef} tabIndex={-1} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <Sliders size={14} />
           <span>Settings</span>

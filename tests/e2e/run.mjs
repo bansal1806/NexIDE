@@ -404,6 +404,40 @@ try {
     check('stdin: Input box is per file and remembered', jsInput === '' && pyInput === 'for-python' && stored['main.py'] === 'for-python',
       `js=${JSON.stringify(jsInput)} py=${JSON.stringify(pyInput)}`);
 
+    // File tree keyboard navigation (WAI-ARIA tree). Root: lib/ (expanded), then files.
+    const focusedPath = () => document.activeElement?.getAttribute('data-path');
+    const waitFocus = (path) => ws.waitForFunction(
+      `document.activeElement?.getAttribute('data-path') === ${JSON.stringify(path)}`, null, { timeout: 5000 }
+    ).then(() => true, () => false);
+    const waitExpanded = (path, value) => ws.waitForFunction(
+      `document.querySelector('[role="treeitem"][data-path=${JSON.stringify(path)}]')?.getAttribute('aria-expanded') === ${JSON.stringify(value)}`,
+      null, { timeout: 5000 }
+    ).then(() => true, () => false);
+    await ws.focus('[role="treeitem"][data-path="lib"]');
+    const treeSteps = {};
+    await ws.keyboard.press('ArrowLeft');          // collapse lib
+    treeSteps.collapsed = await waitExpanded('lib', 'false');
+    await ws.keyboard.press('ArrowRight');         // expand lib
+    treeSteps.expanded = await waitExpanded('lib', 'true');
+    await ws.keyboard.press('ArrowRight');         // into first child
+    treeSteps.intoChild = await waitFocus('lib/fmt.ts');
+    await ws.keyboard.press('ArrowDown');
+    treeSteps.down = await waitFocus('lib/math.js');
+    await ws.keyboard.press('ArrowLeft');          // back to parent folder
+    treeSteps.parent = await waitFocus('lib');
+    await ws.keyboard.press('End');
+    treeSteps.end = await waitFocus('main.py');
+    await ws.keyboard.press('Home');
+    treeSteps.home = await waitFocus('lib');
+    await ws.focus('[role="treeitem"][data-path="config.json"]');
+    await ws.keyboard.press('Enter');              // open the file
+    treeSteps.opened = await ws.waitForFunction(
+      () => document.querySelector('[role="tab"][aria-selected="true"] .tab-name')?.textContent === 'config.json', null, { timeout: 5000 }
+    ).then(() => true, () => false);
+    treeSteps.oneTabStop = await ws.evaluate(() => document.querySelectorAll('[role="treeitem"][tabindex="0"]').length === 1);
+    check('File tree: arrows / Home / End / Enter follow the ARIA tree pattern',
+      Object.values(treeSteps).every(Boolean), JSON.stringify(treeSteps) + ` focused=${await ws.evaluate(focusedPath)}`);
+
     // Keyboard-accessible tab bar: arrows move focus + selection, Delete closes the focused tab
     const tabState = () => ws.evaluate(() => ({
       names: [...document.querySelectorAll('[role="tab"] .tab-name')].map(e => e.textContent),
@@ -528,6 +562,25 @@ try {
     } finally {
       await offlineContext.close();
     }
+  }
+
+  // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
+  {
+    await page.focus('#btn-topbar-settings');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#settings-modal', { timeout: 5000 });
+    const inside = () => page.evaluate(() => !!document.querySelector('#settings-modal')?.contains(document.activeElement));
+    const focusedIn = await page.waitForFunction(() => document.querySelector('#settings-modal')?.contains(document.activeElement), null, { timeout: 5000 }).then(() => true, () => false);
+    let trapped = true;
+    for (let i = 0; i < 30; i++) {
+      await page.keyboard.press(i % 7 === 6 ? 'Shift+Tab' : 'Tab');
+      if (!(await inside())) { trapped = false; break; }
+    }
+    await page.keyboard.press('Escape');
+    const closed = await page.waitForSelector('#settings-modal', { state: 'detached', timeout: 5000 }).then(() => true, () => false);
+    const returned = await page.waitForFunction(() => document.activeElement?.id === 'btn-topbar-settings', null, { timeout: 5000 }).then(() => true, () => false);
+    check('Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns',
+      focusedIn && trapped && closed && returned, JSON.stringify({ focusedIn, trapped, closed, returned }));
   }
 
   // ── Accessibility: axe-core audit of the main screens (WCAG 2.x A/AA rules) ──
