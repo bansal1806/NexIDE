@@ -3,6 +3,10 @@
 // and the main thread can terminate() it at any time (infinite loops, Stop button).
 import { executeJs } from './executeJs';
 import { transpileTS } from './transpile';
+import { lockdownWorkerScope } from './lockdown';
+
+// Before any user code can run (each run gets a fresh worker)
+lockdownWorkerScope(self);
 
 const LOG_FLUSH_MS = 50;
 let runId = null;

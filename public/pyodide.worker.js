@@ -156,8 +156,26 @@ async def _nx_run(source, ns, debug):
         _nx_stop()
 `;
 
+// Same as src/runtime/lockdown.js (this file is served as-is, not bundled).
+// Python code can reach JS globals through the `js` module, so remove origin storage
+// and worker-spawning APIs from every prototype before any user code runs.
+function lockdownWorkerScope(scope) {
+  const removeEverywhere = (obj, name) => {
+    for (let o = obj; o; o = Object.getPrototypeOf(o)) {
+      const desc = Object.getOwnPropertyDescriptor(o, name);
+      if (!desc) continue;
+      if (desc.configurable) delete o[name];
+      else if (desc.writable) o[name] = undefined;
+    }
+  };
+  ['indexedDB', 'caches', 'Worker', 'SharedWorker', 'BroadcastChannel', 'cookieStore']
+    .forEach(name => removeEverywhere(scope, name));
+  ['storage', 'serviceWorker'].forEach(name => removeEverywhere(scope.navigator, name));
+}
+
 const pyodideReady = (async () => {
   const pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
+  lockdownWorkerScope(self);
   // A distinct filename keeps the debugger's tracer away from these helpers
   pyodide.runPython(BOOTSTRAP, { filename: '<nexide>' });
   return {

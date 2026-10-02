@@ -72,6 +72,16 @@ try {
   check('Sandbox: localStorage inaccessible', /localStorage blocked: ReferenceError/.test(sandboxOut) && !/AIza-E2E-SECRET/.test(sandboxOut));
   check('Sandbox: no DOM in runner', /document is undefined/.test(sandboxOut));
 
+  await setCode([
+    `const found = ['indexedDB', 'caches', 'Worker', 'SharedWorker', 'BroadcastChannel'].filter(n => typeof self[n] !== 'undefined');`,
+    `let proto = self, recovered = [];`,
+    `while ((proto = Object.getPrototypeOf(proto))) for (const n of ['indexedDB', 'caches']) if (Object.getOwnPropertyDescriptor(proto, n)) recovered.push(n);`,
+    `console.log('lockdown:', JSON.stringify({ found, recovered, storage: typeof navigator.storage }));`,
+  ].join('\n'));
+  await run();
+  check('Sandbox: storage & worker APIs removed (not recoverable)',
+    await waitConsole(/lockdown: \{"found":\[\],"recovered":\[\],"storage":"undefined"\}/));
+
   await setCode(`console.log('spinning');\nwhile (true) {}`);
   await run();
   await page.waitForTimeout(800);
@@ -147,6 +157,10 @@ try {
   await setCode(`def square(n):\n    r = n * n\n    return r\n\nnums = [square(i) for i in range(4)]\nprint("nums", nums)`);
   await run();
   check('Python: runs via Pyodide', await waitConsole(/nums \[0, 1, 4, 9\]/, 90000));
+
+  await setCode(`import js\nprint("py-lockdown", [hasattr(js, n) for n in ("indexedDB", "caches", "Worker")])`);
+  await run();
+  check('Python: js-module cannot reach storage/worker APIs', await waitConsole(/py-lockdown \[False, False, False\]/, 30000));
 
   await setCode(`x = 1\nraise ValueError("boom")`);
   await run();
