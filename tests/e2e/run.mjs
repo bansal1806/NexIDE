@@ -4,7 +4,7 @@
 //   E2E_BROWSER=chrome|msedge                                 → pick the browser channel
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -341,6 +341,40 @@ try {
     check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
     await ws.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── Deploy skew: a lazy chunk from the old deployment is gone (local build only) ──
+  if (server) {
+    const assetsDir = join(server.config.root, server.config.build.outDir, 'assets');
+    const chunk = readdirSync(assetsDir).find(f => /^CodeMap-.*\.js$/.test(f));
+    // Own context = own HTTP cache (the main page already loaded this chunk)
+    const staleContext = await browser.newContext({ viewport: { width: 1500, height: 900 } });
+    const stale = await staleContext.newPage();
+    await stale.goto(BASE);
+    await stale.click('#welcome-template-js');
+    await stale.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+    await stale.waitForTimeout(500);
+    renameSync(join(assetsDir, chunk), join(assetsDir, `${chunk}.gone`));
+    try {
+      const missing = await stale.request.get(new URL(`/assets/${chunk}`, BASE).href);
+      check('Deploy skew: missing asset is a 404, not index.html',
+        missing.status() === 404 && !/text\/html/.test(missing.headers()['content-type'] || ''));
+
+      // Unsaved work → no auto-reload; the panel offers Reload and the status bar says why
+      await stale.evaluate(() => window.monaco.editor.getEditors()[0].trigger('e2e', 'type', { text: '// edit\n' }));
+      let reloaded = false;
+      stale.on('framenavigated', f => { if (f === stale.mainFrame()) reloaded = true; });
+      await stale.click('#btn-toggle-map');
+      const offered = await stale.waitForSelector('#btn-reload-app', { timeout: 10000 }).then(() => true, () => false);
+      await stale.waitForFunction(() => /NexIDE was updated/.test(document.querySelector('.statusbar')?.innerText || ''), null, { timeout: 5000 }).catch(() => {});
+      const status = await stale.locator('.statusbar').innerText().catch(() => '');
+      check('Deploy skew: unsaved work is kept; Reload offered instead of a crash',
+        offered && !reloaded && /NexIDE was updated/.test(status),
+        `offered=${offered} reloaded=${reloaded} status=${/NexIDE was updated/.test(status)}`);
+    } finally {
+      renameSync(join(assetsDir, `${chunk}.gone`), join(assetsDir, chunk));
+      await staleContext.close();
+    }
   }
 
   // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
