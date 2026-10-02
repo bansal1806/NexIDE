@@ -4,10 +4,11 @@ import { X, Key, Sliders, Type, Save, Eye, EyeOff } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
 
 const THEMES = [
-  { id: 'nexide-dark', label: 'Nexide Dark',  preview: '#0d0e14' },
-  { id: 'vs-dark',     label: 'VS Dark',      preview: '#1e1e1e' },
-  { id: 'aurora',      label: 'Aurora',       preview: '#0d1a12' },
-  { id: 'crimson',     label: 'Crimson',      preview: '#1a0d0d' },
+  // Ids are stored in settings; labels/previews are the Playground names
+  { id: 'nexide-dark', label: 'Playground', preview: 'linear-gradient(120deg, #7df2c6, #8fd8ff, #c9b0ff, #ff9ad1)' },
+  { id: 'aurora',      label: 'Lagoon',     preview: 'linear-gradient(120deg, #86f0c8, #7fe3f0, #b9c4ff)' },
+  { id: 'crimson',     label: 'Sunset',     preview: 'linear-gradient(120deg, #ffd97a, #ffb07a, #ff9fc0)' },
+  { id: 'vs-dark',     label: 'Classic',    preview: '#3c3c3c' },
 ];
 
 export function Settings({ open, ...props }) {

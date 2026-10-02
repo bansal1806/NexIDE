@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { MotionConfig } from 'framer-motion'
 import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from './context/AuthContext'
@@ -19,8 +20,11 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    {/* Springs and fades are skipped for users who ask the OS to reduce motion */}
+    <MotionConfig reducedMotion="user">
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </MotionConfig>
   </StrictMode>,
 )

@@ -8,6 +8,7 @@ import {
   Settings as SettingsIcon, TerminalSquare, Files, Map as MapIcon, MessageSquare,
 } from 'lucide-react';
 import './App.css';
+import './styles/playground.css'; // Playground design layer — must load after App.css
 
 // Hooks
 import { useCodeRunner }      from './hooks/useCodeRunner';
@@ -20,6 +21,7 @@ import { useProgramInput }    from './hooks/useProgramInput';
 import { usePackageLocks }    from './hooks/usePackageLocks';
 import { useDeployRecovery }  from './hooks/useDeployRecovery';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { useCelebrate }       from './hooks/useCelebrate';
 import { stdinLines }         from './runtime/output';
 
 // Components
@@ -115,6 +117,7 @@ export default function App() {
   const consoleOutput = isPythonTab ? pyOutput : jsOutput;
   const runStatus = (isPythonTab ? pyStatus : jsStatus) || 'idle';
   const isRunning = jsStatus === 'running' || pyStatus === 'running';
+  useCelebrate(runStatus);
 
   // ── AI ───────────────────────────────────────────────────────────
   const gemini = useGemini({ apiKey: settings.geminiApiKey });
@@ -384,6 +387,27 @@ export default function App() {
             </div>
           )}
 
+          {isDebugging && snapshots.length > 0 && (
+            <DebugTimeline
+              snapshots={snapshots}
+              currentIndex={currentIndex}
+              onSeek={setPlayhead}
+              onStepBack={stepBackward}
+              onStepForward={stepForward}
+              onJumpToStart={jumpToStart}
+              onJumpToEnd={jumpToEnd}
+              onReset={exitDebug}
+              onTogglePlay={togglePlay}
+              onPrevBreakpoint={jumpToPrevBreakpoint}
+              onNextBreakpoint={jumpToNextBreakpoint}
+              isPlaying={isPlaying}
+              playSpeed={playSpeed}
+              onSpeedChange={setPlaySpeed}
+              breakpoints={breakpoints}
+              stats={stats}
+              isLive={isRunning && currentIndex === snapshots.length - 1}
+            />
+          )}
           {bottomPanel && (
             <BottomPanel
               panel={bottomPanel}
@@ -436,27 +460,6 @@ export default function App() {
           />
         )}
 
-        {isDebugging && snapshots.length > 0 && (
-          <DebugTimeline
-            snapshots={snapshots}
-            currentIndex={currentIndex}
-            onSeek={setPlayhead}
-            onStepBack={stepBackward}
-            onStepForward={stepForward}
-            onJumpToStart={jumpToStart}
-            onJumpToEnd={jumpToEnd}
-            onReset={exitDebug}
-            onTogglePlay={togglePlay}
-            onPrevBreakpoint={jumpToPrevBreakpoint}
-            onNextBreakpoint={jumpToNextBreakpoint}
-            isPlaying={isPlaying}
-            playSpeed={playSpeed}
-            onSpeedChange={setPlaySpeed}
-            breakpoints={breakpoints}
-            stats={stats}
-            isLive={isRunning && currentIndex === snapshots.length - 1}
-          />
-        )}
       </div>
 
       <StatusBar

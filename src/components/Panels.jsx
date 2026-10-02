@@ -12,7 +12,8 @@ import { PackagesPanel } from './PackagesPanel';
 const CodeMap     = lazy(() => import('./CodeMap'));
 const LivePreview = lazy(() => import('./LivePreview'));
 
-const label = (id) => id.charAt(0).toUpperCase() + id.slice(1);
+const LABELS = { ai: 'AI' };
+const label = (id) => LABELS[id] || id.charAt(0).toUpperCase() + id.slice(1);
 const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, style: { height: '100%' } };
 
 function PanelTabs({ tabs, active, onSelect, onClose }) {
