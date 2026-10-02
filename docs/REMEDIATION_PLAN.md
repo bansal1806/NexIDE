@@ -125,8 +125,20 @@ Note: COEP `credentialless` means third-party iframes *inside a user's preview p
 load only if they are COEP-compatible; scripts, images, fonts and fetch from CDNs are unaffected.
 Safari lacks `credentialless`, so there the page isn't isolated and input falls back to the pre-filled box.
 
+## Phase 5 — Deploy resilience, npm packages, per-file input (branch `phase-5`)
+
+- [x] **Deploy skew**: a tab open during a deploy no longer breaks — `/assets` and `/pyodide` aren't rewritten to
+  `index.html` (real 404s); on a stale lazy chunk the app reloads itself if nothing is unsaved, otherwise
+  `ChunkErrorBoundary` offers Reload and the status bar asks the user to save first.
+  Found & fixed along the way: `preventDefault()` on `vite:preloadError` made Vite resolve the import with
+  `undefined`, crashing the panel.
+- [x] **npm packages in the JS runner**: bare imports (`lodash-es`, `dayjs`, `@scope/pkg@ver/sub`) are fetched from
+  esm.sh before the run (names validated; esm.sh is the only remote script source in the worker CSP).
+- [x] **Input box per file**, remembered across reloads (50 files × 10 KB cap).
+- Verification: lint clean · unit 70/70 · E2E 45/45 under production headers.
+
 ## Ideas for a later phase
 
-- npm packages in the JS runner (resolve bare imports through an ESM CDN, with an allowlist).
 - Python debugger for imported workspace modules (currently traces the entry file).
-- Persist the Input box per file.
+- Pin npm package versions per workspace (a small lockfile) for reproducible runs.
+- Offline support (service worker caching the app shell, Monaco and the Pyodide core).

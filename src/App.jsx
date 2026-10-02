@@ -229,7 +229,27 @@ export default function App() {
 
   // ── Cursor / editor ──────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-  const [stdinText, setStdinText] = useState('');
+  // Program input (console "Input" box), remembered per file across reloads
+  const STDIN_KEY = 'nexide:stdin';
+  const [stdinByPath, setStdinByPath] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(STDIN_KEY)) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(STDIN_KEY, JSON.stringify(stdinByPath)); } catch { /* storage full/blocked */ }
+  }, [stdinByPath]);
+  const stdinText = activeTab ? (stdinByPath[activeTab.path] || '') : '';
+  const setStdinText = useCallback((text) => {
+    const path = activeTabRef.current?.path;
+    if (!path) return;
+    setStdinByPath(prev => {
+      const next = { ...prev };
+      delete next[path];
+      if (text) next[path] = text.slice(0, 10_000); // re-insert last = most recently used
+      const keys = Object.keys(next);
+      keys.slice(0, Math.max(0, keys.length - 50)).forEach(k => delete next[k]);
+      return next;
+    });
+  }, []);
   const editorRef = useRef(null);
 
   // The active tab with the editor's *live* text. React state lags the editor by a render,
@@ -427,11 +447,11 @@ export default function App() {
   const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
-    const opts = { ...options, stdin: stdinLines(stdinText), path: tab.path, files: buildRunFiles(tab) };
+    const opts = { ...options, stdin: stdinLines(stdinByPath[tab.path] || ''), path: tab.path, files: buildRunFiles(tab) };
     return tab.lang === 'python'
       ? runPython(tab.content, opts)
       : runJs(tab.content, tab.lang, opts);
-  }, [runPython, runJs, stdinText, buildRunFiles]);
+  }, [runPython, runJs, stdinByPath, buildRunFiles]);
 
   const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 

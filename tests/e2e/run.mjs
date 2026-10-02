@@ -346,6 +346,17 @@ try {
     await ws.waitForTimeout(500);
     await ws.click('#btn-run-code');
     check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
+
+    // The Input box belongs to the file it was typed for
+    if (!(await ws.locator('#console-stdin').isVisible().catch(() => false))) await ws.click('#btn-toggle-stdin');
+    await ws.fill('#console-stdin', 'for-python');
+    await ws.click('.file-tree-item[title="main.js"]');
+    const jsInput = await ws.inputValue('#console-stdin');
+    await ws.click('.file-tree-item[title="main.py"]');
+    const pyInput = await ws.inputValue('#console-stdin');
+    const stored = await ws.evaluate(() => JSON.parse(localStorage.getItem('nexide:stdin') || '{}'));
+    check('stdin: Input box is per file and remembered', jsInput === '' && pyInput === 'for-python' && stored['main.py'] === 'for-python',
+      `js=${JSON.stringify(jsInput)} py=${JSON.stringify(pyInput)}`);
     await ws.close();
     rmSync(dir, { recursive: true, force: true });
   }
