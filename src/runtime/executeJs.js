@@ -1,8 +1,5 @@
 import { checkSyntax, instrumentJS } from './instrument';
-import { usesModules, toCommonJS, createModuleSystem, collectBareImports, isValidPackageSpec, PACKAGE_CDN } from './modules';
-
-// Browser: native dynamic import of the ESM build (sandboxed worker; esm.sh only, per CSP)
-const defaultLoadPackage = (spec) => import(/* @vite-ignore */ `${PACKAGE_CDN}${spec}`);
+import { usesModules, toCommonJS, createModuleSystem, collectBareImports, isValidPackageSpec, loadPinnedPackage } from './modules';
 
 const CAP_MISSING = Symbol('missing');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -136,7 +133,8 @@ function makeConsole(emit) {
  */
 export async function executeJs(code, {
   debug = false, maxSteps = DEFAULT_MAX_STEPS, onLog, onSteps, path = 'main.js', files = {},
-  loadPackage = defaultLoadPackage,
+  loadPackage = loadPinnedPackage, // (spec, lockedId) → { id, namespace, fromLock }
+  packageLock = {},                  // spec → exact esm.sh id, per workspace
 } = {}) {
   let lastLog = null;
   const emit = (type, text) => { lastLog = text; onLog?.(type, text); };
@@ -155,14 +153,17 @@ export async function executeJs(code, {
 
   // npm packages: fetch every bare import up front (require() is synchronous)
   const packages = {};
+  const pins = {}; // returned so the app can persist the workspace's package lock
   if (isModule) {
     for (const spec of collectBareImports(code, path, files)) {
       if (!isValidPackageSpec(spec)) {
         return { ok: false, error: `Invalid package name "${spec}"`, line: null, steps: 0 };
       }
-      emit('system', `📦 Loading ${spec} from esm.sh…`);
       try {
-        packages[spec] = await loadPackage(spec);
+        const { id, namespace, fromLock } = await loadPackage(spec, packageLock[spec]);
+        packages[spec] = namespace;
+        pins[spec] = id;
+        emit('system', fromLock ? `📦 ${id}` : `📦 ${spec} → ${id} (pinned for this workspace)`);
       } catch (err) {
         return { ok: false, error: `Could not load package "${spec}" from esm.sh: ${err?.message || err}`, line: null, steps: 0 };
       }
@@ -225,12 +226,12 @@ export async function executeJs(code, {
     const fn = new AsyncFunction(...Object.keys(scope), source);
     await fn(...Object.values(scope));
     flush();
-    return { ok: true, steps: stepCount };
+    return { ok: true, steps: stepCount, pins };
   } catch (err) {
     flush();
     const name = err?.name || 'Error';
     const message = err?.message ?? String(err);
-    return { ok: false, error: `${name}: ${message}`, line: errorLine(err), steps: stepCount };
+    return { ok: false, error: `${name}: ${message}`, line: errorLine(err), steps: stepCount, pins };
   }
 }
 

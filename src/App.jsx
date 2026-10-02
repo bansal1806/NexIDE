@@ -465,14 +465,44 @@ export default function App() {
     return files;
   }, [workspaceFiles, fileTree]);
 
+  // npm packages are pinned per workspace on first use (reproducible runs; pinned esm.sh URLs
+  // are immutable, so the service worker can serve them offline)
+  const workspaceKey = cloudMode ? `cloud:${activeProjectId}`
+    : githubMode ? `github:${githubInfo?.owner}/${githubInfo?.repo}`
+    : fs.rootName ? `local:${fs.rootName}` : 'scratch';
+  const [npmLocks, setNpmLocks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nexide:npm-lock')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('nexide:npm-lock', JSON.stringify(npmLocks)); } catch { /* storage full/blocked */ }
+  }, [npmLocks]);
+  const savePins = useCallback((key, pins) => {
+    if (!pins || Object.keys(pins).length === 0) return;
+    setNpmLocks(prev => {
+      const current = prev[key] || {};
+      if (Object.entries(pins).every(([spec, id]) => current[spec] === id)) return prev;
+      return { ...prev, [key]: { ...current, ...pins } };
+    });
+  }, []);
+  const clearPins = useCallback(() => {
+    setNpmLocks(prev => {
+      const next = { ...prev };
+      delete next[workspaceKey];
+      return next;
+    });
+    notify('info', 'npm packages will resolve to their latest versions on the next run.');
+  }, [workspaceKey, notify]);
+
   const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
     const opts = { ...options, stdin: stdinLines(stdinByPath[tab.path] || ''), path: tab.path, files: buildRunFiles(tab) };
-    return tab.lang === 'python'
-      ? runPython(tab.content, opts)
-      : runJs(tab.content, tab.lang, opts);
-  }, [runPython, runJs, stdinByPath, buildRunFiles]);
+    if (tab.lang === 'python') return runPython(tab.content, opts);
+    const key = workspaceKey;
+    const run = runJs(tab.content, tab.lang, { ...opts, packageLock: npmLocks[key] || {} });
+    run?.then?.(result => savePins(key, result?.pins));
+    return run;
+  }, [runPython, runJs, stdinByPath, buildRunFiles, workspaceKey, npmLocks, savePins]);
 
   const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 
@@ -611,8 +641,9 @@ export default function App() {
       case 'toggle-terminal': setBottomPanel(v => v === 'terminal' ? null : 'terminal'); break;
       case 'open-settings':   setSettingsOpen(true); break;
       case 'run-file':        runCode();           break;
+      case 'npm-update-pins': clearPins();         break;
     }
-  }, [handleOpenFolder, runCode]);
+  }, [handleOpenFolder, runCode, clearPins]);
 
   const handleTerminalRun = useCallback(async (path) => {
     const tab = await openFileInTab({ path, name: path.split('/').pop() });

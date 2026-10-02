@@ -75,10 +75,19 @@ async function staleWhileRevalidate(request, event) {
   return refresh;
 }
 
+// esm.sh URLs with an exact version (/pkg@1.2.3/…, /@scope/pkg@1.2.3/…) are immutable — the
+// runner imports pinned packages through them, so caching makes them available offline.
+const ESM_ORIGIN = 'https://esm.sh';
+const ESM_PINNED = /^\/(?:@[^/]+\/)?[^/@]+@\d[^/]*\//;
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
+  if (url.origin === ESM_ORIGIN) {
+    if (ESM_PINNED.test(`${url.pathname}/`)) event.respondWith(cacheFirst(request));
+    return;
+  }
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname === '/sw.js') return;
 

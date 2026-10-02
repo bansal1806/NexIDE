@@ -39,6 +39,7 @@ function PaletteInner({ onClose, openTabs, fileTree, onOpenFile, onCommand }) {
         { id: 'toggle-terminal', icon: <TerminalSquare size={13} />,  label: 'View: Toggle Terminal',          cmd: 'toggle-terminal' },
         { id: 'open-settings',   icon: <Settings size={13} />,        label: 'Preferences: Open Settings',     cmd: 'open-settings' },
         { id: 'run-file',        icon: <Zap size={13} />,             label: 'Run: Execute Current File',      cmd: 'run-file' },
+        { id: 'npm-update-pins', icon: <Zap size={13} />,             label: 'Packages: Update pinned npm versions', cmd: 'npm-update-pins' },
       ];
       return commands.filter(c => fuzzyMatch(c.label, search));
     }
