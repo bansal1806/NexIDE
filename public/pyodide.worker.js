@@ -134,6 +134,36 @@ def _nx_start(debug):
 def _nx_stop():
     sys.settrace(None)
 
+_NX_WS = '/home/pyodide/workspace'
+
+def _nx_sync_files(files, entry_path):
+    """Mirror the workspace into the virtual FS so 'import helper' and open('data.csv') work."""
+    import os, shutil, importlib
+    # The previous run left the cwd inside the workspace; a busy cwd can't be removed
+    os.chdir('/home/pyodide')
+    if os.path.isdir(_NX_WS):
+        shutil.rmtree(_NX_WS)
+    os.makedirs(_NX_WS, exist_ok=True)
+    for path, content in files.items():
+        full = os.path.normpath(os.path.join(_NX_WS, path))
+        if not full.startswith(_NX_WS + '/'):
+            continue  # ignore anything escaping the workspace
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w', encoding='utf-8') as f:
+            f.write(content)
+    os.chdir(_NX_WS)
+    # Like "python path/to/main.py": the script's directory comes first on sys.path
+    entry_dir = os.path.normpath(os.path.join(_NX_WS, os.path.dirname(entry_path or '')))
+    for p in (_NX_WS, entry_dir):
+        while p in sys.path:
+            sys.path.remove(p)
+    sys.path[:0] = [entry_dir] if entry_dir == _NX_WS else [entry_dir, _NX_WS]
+    # Re-import edited workspace modules on every run
+    for name, mod in list(sys.modules.items()):
+        if (getattr(mod, '__file__', None) or '').startswith(_NX_WS):
+            del sys.modules[name]
+    importlib.invalidate_caches()
+
 def _nx_short_repr(v):
     try:
         r = repr(v)
@@ -157,11 +187,22 @@ async def _nx_run(source, ns, debug):
             tb = tb.tb_next
         text = ''.join(traceback.format_exception(type(e), e, tb)).rstrip()
         if isinstance(e, EOFError):
-            text += "\\n(Hint: put program input in the Console's Input box — one line per input() call.)"
+            text += "\\n(Hint: input ended. Answer at the console prompt, or pre-fill the Console's Input box — one line per input() call.)"
         return [False, text]
     finally:
         _nx_stop()
 `;
+
+// Same as readStdinBlocking in src/runtime/stdinChannel.js (this file is served as-is, not bundled).
+function readStdinBlocking(sab, request) {
+  const ctl = new Int32Array(sab, 0, 2);
+  Atomics.store(ctl, 0, 0);
+  request();
+  Atomics.wait(ctl, 0, 0);
+  const length = Atomics.load(ctl, 1);
+  if (length < 0) return null;
+  return new TextDecoder().decode(new Uint8Array(sab, 8, length).slice());
+}
 
 // Same as src/runtime/lockdown.js (this file is served as-is, not bundled).
 // Python code can reach JS globals through the `js` module, so remove origin storage
@@ -189,6 +230,7 @@ const pyodideReady = (async () => {
     pyodide,
     newDict: pyodide.globals.get('dict'),
     nxRun: pyodide.globals.get('_nx_run'),
+    nxSyncFiles: pyodide.globals.get('_nx_sync_files'),
   };
 })();
 
@@ -198,7 +240,7 @@ pyodideReady.then(
 );
 
 self.onmessage = async (event) => {
-  const { type, id, code, debug = false, stdin = [] } = event.data || {};
+  const { type, id, code, debug = false, stdin = [], files = {}, path = 'main.py', stdinSab = null } = event.data || {};
   if (type !== 'run') return;
   currentRunId = id;
 
@@ -221,17 +263,56 @@ self.onmessage = async (event) => {
     outBuffer.push({ stream: 'stderr', text: `Package install failed: ${err?.message || err}` });
   }
 
-  // Program input: each input() call consumes one line; echoed like a terminal would
+  // Program input: pre-filled Input-box lines first, then (if the page is cross-origin
+  // isolated) ask interactively and block until answered. Echoed like a terminal would.
   const lines = Array.isArray(stdin) ? stdin.slice() : [];
-  py.pyodide.setStdin({
-    autoEOF: false,
-    stdin: () => {
-      if (!lines.length) return null; // EOF → EOFError in Python
+  const nextLine = () => {
+    if (lines.length) {
       const line = String(lines.shift());
       self.nexideOutput('stdout', line + '\n');
-      return line + '\n';
+      return line;
+    }
+    if (!stdinSab) return null;
+    // input("Name? ") already wrote its prompt; send it with the request, echo with the answer
+    const promptText = partial.stdout;
+    partial.stdout = '';
+    const line = readStdinBlocking(stdinSab, () => {
+      flush();
+      self.postMessage({ type: 'stdin-request', runId: id, prompt: promptText });
+    });
+    outBuffer.push({ stream: 'stdout', text: promptText + (line ?? '') });
+    scheduleFlush();
+    return line;
+  };
+
+  // Low-level read(): called once per read syscall, so input() asks for exactly one line.
+  // (The higher-level `stdin` callback is polled until a buffer fills, which asked the user
+  // for the next line before the program needed it.)
+  let pendingBytes = new Uint8Array(0);
+  const encoder = new TextEncoder();
+  py.pyodide.setStdin({
+    isatty: true,
+    read(buffer) {
+      if (!pendingBytes.length) {
+        const line = nextLine();
+        if (line === null) return 0; // EOF → EOFError in Python
+        pendingBytes = encoder.encode(line + '\n');
+      }
+      const n = Math.min(buffer.length, pendingBytes.length);
+      buffer.set(pendingBytes.subarray(0, n));
+      pendingBytes = pendingBytes.subarray(n);
+      return n;
     },
   });
+
+  // Workspace files → virtual FS (imports between .py files, reading data files)
+  try {
+    const pyFiles = py.pyodide.toPy(files);
+    py.nxSyncFiles(pyFiles, path);
+    pyFiles.destroy();
+  } catch (err) {
+    outBuffer.push({ stream: 'stderr', text: `Could not load workspace files: ${err?.message || err}` });
+  }
 
   // Fresh namespace per run: no state leaks between runs, and helper names stay hidden
   const namespace = py.newDict();

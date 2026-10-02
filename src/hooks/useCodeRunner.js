@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { appendLines, makeLine } from '../runtime/output';
+import { useStdinRequest } from './useStdinRequest';
 
 /**
  * JavaScript / TypeScript runner.
@@ -12,6 +13,8 @@ export function useCodeRunner() {
   const [status, setStatus] = useState('idle'); // idle | running | success | error
   const workerRef = useRef(null);
   const runRef = useRef(null); // { id, resolve, onDebugSteps }
+  const stdin = useStdinRequest();
+  const { open: openStdin, ask: askStdin, cancel: cancelStdin } = stdin;
 
   const addLines = useCallback((lines) => setOutput(prev => appendLines(prev, lines)), []);
   const addLine = useCallback((type, text) => addLines([makeLine(type, text)]), [addLines]);
@@ -19,7 +22,8 @@ export function useCodeRunner() {
   const killWorker = useCallback(() => {
     workerRef.current?.terminate();
     workerRef.current = null;
-  }, []);
+    cancelStdin();
+  }, [cancelStdin]);
 
   useEffect(() => killWorker, [killWorker]);
 
@@ -52,6 +56,7 @@ export function useCodeRunner() {
 
     const worker = new Worker(new URL('../runtime/jsRunner.worker.js', import.meta.url), { type: 'module' });
     workerRef.current = worker;
+    const channel = openStdin();
 
     return new Promise((resolve) => {
       runRef.current = { id, resolve, onDebugSteps: options.onDebugSteps };
@@ -60,6 +65,8 @@ export function useCodeRunner() {
         if (!data || data.runId !== id) return;
         if (data.type === 'logs') {
           addLines(data.lines.map(l => makeLine(l.type, l.text)));
+        } else if (data.type === 'stdin-request') {
+          askStdin(data.prompt); // may also come from a timer after 'done'
         } else if (data.type === 'steps') {
           runRef.current?.onDebugSteps?.(data.steps);
         } else if (data.type === 'done') {
@@ -87,9 +94,15 @@ export function useCodeRunner() {
         finish({ ok: false, error: e.message });
       };
 
-      worker.postMessage({ type: 'run', id, code, language, debug, stdin: options.stdin || [] });
+      worker.postMessage({
+        type: 'run', id, code, language, debug,
+        stdin: options.stdin || [],
+        path: options.path,
+        files: options.files || {},
+        stdinSab: channel?.sab ?? null,
+      });
     });
-  }, [addLine, addLines, finish, killWorker]);
+  }, [addLine, addLines, finish, killWorker, openStdin, askStdin]);
 
   const stop = useCallback(() => {
     if (!workerRef.current) return;
@@ -110,5 +123,8 @@ export function useCodeRunner() {
 
   const addConsoleMessage = useCallback((type, text) => addLine(type, text), [addLine]);
 
-  return { output, status, runCode, stop, clearOutput, addConsoleMessage };
+  return {
+    output, status, runCode, stop, clearOutput, addConsoleMessage,
+    inputRequest: stdin.inputRequest, submitInput: stdin.submit, endInput: stdin.eof,
+  };
 }

@@ -4,6 +4,9 @@
 //   E2E_BROWSER=chrome|msedge                                 → pick the browser channel
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -84,6 +87,8 @@ try {
 
   // ── JavaScript ──
   await openTemplate('js');
+  check('Page is cross-origin isolated (SharedArrayBuffer available)',
+    await page.evaluate(() => self.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function'));
 
   // Legacy plaintext key (seeded above) is migrated to encrypted storage
   await page.waitForFunction(() => !!localStorage.getItem('nexide:secrets'), null, { timeout: 5000 }).catch(() => {});
@@ -149,6 +154,23 @@ try {
   await run();
   check('stdin: JS prompt() reads Input lines', await waitConsole(/Name\? Ada[\s\S]*Age\? 36[\s\S]*hi Ada, next year 37/));
   await setStdin('');
+
+  await setCode(`console.log('before');\nconst color = prompt('Color? ');\nconsole.log('picked ' + color);`);
+  await run();
+  await page.waitForSelector('#console-input-line', { timeout: 10000 }).catch(() => {});
+  const shownBefore = /before/.test(await consoleText());
+  await page.fill('#console-input-line', 'teal').catch(() => {});
+  await page.press('#console-input-line', 'Enter').catch(() => {});
+  check('stdin: JS interactive prompt() (output shown first)', shownBefore && await waitConsole(/Color\? teal[\s\S]*picked teal/, 10000));
+
+  // Stop works while a program is blocked waiting for input
+  await setCode(`prompt('waiting forever? ');`);
+  await run();
+  await page.waitForSelector('#console-input-line', { timeout: 10000 }).catch(() => {});
+  await run(); // "Stop"
+  const stoppedWhileWaiting = await waitConsole(/stopped by user/, 5000);
+  const promptGone = !(await page.locator('#console-input-line').isVisible().catch(() => false));
+  check('stdin: Stop while waiting for input', stoppedWhileWaiting && promptGone);
 
   // ── Debugger ──
   await setCode(`const a = 1;\nconst b = 2;\nfunction add(x, y) {\n  const s = x + y;\n  return s;\n}\nconsole.log(add(a, b));`);
@@ -225,14 +247,31 @@ try {
   await run();
   check('Python: runs via Pyodide', await waitConsole(/nums \[0, 1, 4, 9\]/, 90000));
 
+  // Pre-filled lines are used first; when they run out the program asks interactively
   await setStdin('Grace\n');
   await setCode(`name = input("Who? ")\nprint(f"hello {name}")\ninput("again? ")`);
   await run();
+  const askedAgain = await page.waitForSelector('#console-input-line', { timeout: 30000 }).then(() => true, () => false);
+  await page.click('#btn-console-eof');
   await waitConsole(/EOFError/, 30000);
   const stdinOut = await consoleText();
   check('stdin: Python input() echoes like a terminal', /Who\? Grace/.test(stdinOut) && /hello Grace/.test(stdinOut));
-  check('stdin: running out of input explains the Input box', /EOFError[\s\S]*Input box/.test(stdinOut));
+  check('stdin: asks interactively after pre-filled lines; EOF explains', askedAgain && /EOFError[\s\S]*Input box/.test(stdinOut));
   await setStdin('');
+
+  // Fully interactive: type answers while the program waits
+  await setCode(`name = input("Name? ")\nage = int(input("Age? "))\nprint(f"{name} will be {age + 1}")`);
+  await run();
+  for (const answer of ['Ada', '36']) {
+    await page.waitForSelector('#console-input-line', { timeout: 30000 });
+    await page.fill('#console-input-line', answer);
+    await page.press('#console-input-line', 'Enter');
+    await page.waitForTimeout(200);
+  }
+  await waitConsole(/Ada will be 37/, 15000);
+  const interactiveOut = await consoleText();
+  check('stdin: Python interactive input() (typed while waiting)',
+    /Name\? Ada/.test(interactiveOut) && /Age\? 36/.test(interactiveOut) && /Ada will be 37/.test(interactiveOut));
 
   await setCode(`import numpy as np\nprint("numpy sum", int(np.arange(5).sum()))`);
   await run();
@@ -264,6 +303,57 @@ try {
   const origin = new URL(BASE).origin;
   check('Python: core runtime self-hosted (same origin)', pyodideCoreRequests.length > 0 && pyodideCoreRequests.every(u => u.startsWith(origin)), pyodideCoreRequests.find(u => !u.startsWith(origin)) || `${pyodideCoreRequests.length} core requests`);
   check('Editor: Monaco is self-hosted (no CDN requests)', cdnMonacoRequests.length === 0, cdnMonacoRequests[0] || '');
+  // ── Multi-file workspace (Open Folder → imports between files) ──
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'nexide-e2e-'));
+    const files = {
+      'main.js': "import { add } from './lib/math.js';\nimport { fmt } from './lib/fmt.ts';\nimport cfg from './config.json';\nconsole.log('multi', fmt(add(cfg.base, 2)));",
+      'lib/math.js': 'export const add = (a, b) => a + b;',
+      'lib/fmt.ts': 'export const fmt = (n: number): string => `#${n}`;',
+      'config.json': '{ "base": 40 }',
+      'main.py': "import csv\nfrom helper import double\nwith open('data.csv') as f:\n    rows = list(csv.reader(f))\nprint('py-multi', double(int(rows[1][1])))",
+      'helper.py': 'def double(x):\n    return x * 2\n',
+      'data.csv': 'name,value\nanswer,21\n',
+    };
+    for (const [p, content] of Object.entries(files)) {
+      mkdirSync(join(dir, dirname(p)), { recursive: true });
+      writeFileSync(join(dir, p), content);
+    }
+
+    const ws = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+    // Use the <input webkitdirectory> fallback, which automation can drive
+    await ws.addInitScript(() => { delete window.showDirectoryPicker; });
+    await ws.goto(BASE);
+    const [chooser] = await Promise.all([ws.waitForEvent('filechooser'), ws.click('#welcome-btn-open-folder')]);
+    await chooser.setFiles(dir);
+    const wsConsole = (re, timeout) => ws.waitForFunction(
+      (src) => new RegExp(src).test(document.querySelector('#console-panel')?.innerText || ''), re.source, { timeout }
+    ).then(() => true, () => false);
+
+    await ws.click('.file-tree-item[title="main.js"]');
+    await ws.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+    await ws.click('#btn-run-code');
+    check('Workspace: JS imports between files (incl. .ts, .json)', await wsConsole(/multi #42/, 15000));
+
+    await ws.click('.file-tree-item[title="main.py"]');
+    await ws.waitForTimeout(500);
+    await ws.click('#btn-run-code');
+    check('Workspace: Python imports helper.py and reads data.csv', await wsConsole(/py-multi 42/, 90000));
+    await ws.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Regression: the 2nd+ Python run failed to rebuild the workspace (busy cwd)
+  await openTemplate('py');
+  await setCode('print("first")');
+  await run();
+  await waitConsole(/✓ Completed/, 90000);
+  await setCode('print("second")');
+  await run();
+  await waitConsole(/✓ Completed/, 30000);
+  const secondRun = await consoleText();
+  check('Python: repeated runs rebuild the workspace cleanly', /second/.test(secondRun) && !/Resource busy|Could not load workspace/.test(secondRun));
+
   const relevant = pageErrors.filter(e => !/favicon/i.test(e));
   check('No page errors or CSP violations', relevant.length === 0, relevant.slice(0, 3).join(' | '));
 } finally {

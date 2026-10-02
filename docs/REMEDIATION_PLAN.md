@@ -107,8 +107,26 @@ Items marked **[YOU]** need dashboard access and cannot be done from code.
 - [x] **Program input**: console Input box feeds `input()` (Python) and `prompt()` (JS); EOF hint.
 - Verification: lint clean · unit 52/52 · E2E 33/33 under production headers.
 
+## Phase 4 — Self-hosted Python, multi-file projects, interactive input (branch `phase-4`)
+
+- [x] **Self-hosted Pyodide core** (`/pyodide/v0.28.3/`, copied from the pinned npm package at build, cached
+  immutable); only optional packages use jsDelivr; the Python worker's CSP allows no CDN scripts.
+- [x] **Multi-file projects**: JS/TS `import`/`export` between workspace files (Sucrase → CommonJS + workspace
+  `require`, `.ts`/`.json`, circular imports; debugger lines preserved); Python `import helper` and
+  `open('data.csv')` via the virtual FS.
+- [x] **Interactive input**: cross-origin isolation (COOP `same-origin` + COEP `credentialless`) enables a
+  SharedArrayBuffer channel; programs block in `input()` / `prompt()` while the console shows an inline prompt
+  (Enter to send, Ctrl+D / EOF button). Pre-filled Input-box lines are used first. Stop works while waiting.
+- Found & fixed: every Python run after the first failed to rebuild the workspace (cwd inside the folder being
+  deleted); Pyodide's `stdin` callback read ahead and asked for the next line early (switched to `read()`).
+- Verification: lint clean · unit 66/66 · E2E 41/41 under production headers.
+
+Note: COEP `credentialless` means third-party iframes *inside a user's preview page* (e.g. a YouTube embed)
+load only if they are COEP-compatible; scripts, images, fonts and fetch from CDNs are unaffected.
+Safari lacks `credentialless`, so there the page isn't isolated and input falls back to the pre-filled box.
+
 ## Ideas for a later phase
 
-- Self-host Pyodide core files (keeps jsDelivr only for optional packages).
-- Interactive stdin (type while the program waits) via SharedArrayBuffer — needs COOP/COEP.
-- Multi-file JS (ES module imports between workspace files) in the runner.
+- npm packages in the JS runner (resolve bare imports through an ESM CDN, with an allowlist).
+- Python debugger for imported workspace modules (currently traces the entry file).
+- Persist the Input box per file.

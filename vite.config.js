@@ -100,6 +100,14 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), vercelApiDev(), vercelHeadersPreview(), selfHostPyodide()],
     worker: { format: 'es' },
+    // Cross-origin isolation (SharedArrayBuffer → interactive program input) in dev too;
+    // production/preview get it from vercel.json
+    server: {
+      headers: {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'credentialless',
+      },
+    },
     build: {
       // Monaco (lazy-loaded, self-hosted) is ~2.7 MB minified by design
       chunkSizeWarningLimit: 3000,

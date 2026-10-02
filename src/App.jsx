@@ -23,7 +23,7 @@ import { loadSettings, saveSettings, pickSecrets, syncSettingsWithCloud, persist
 import { getSecretStore } from './services/secretStore';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from './services/db';
 import { stdinLines } from './runtime/output';
-import { getLang, findNodeByPath, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
+import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath } from './utils/files';
 
 // Components
 import { FileExplorer }   from './components/FileExplorer';
@@ -197,8 +197,14 @@ export default function App() {
   const [authOpen, setAuthOpen]       = useState(false);
 
   // ── Code execution ───────────────────────────────────────────────
-  const { output: jsOutput, status: jsStatus, runCode: runJs, stop: stopJs, clearOutput: clearJs, addConsoleMessage } = useCodeRunner();
-  const { output: pyOutput, status: pyStatus, runPython, stopPython, clearOutput: clearPy } = usePython();
+  const {
+    output: jsOutput, status: jsStatus, runCode: runJs, stop: stopJs, clearOutput: clearJs, addConsoleMessage,
+    inputRequest: jsInputRequest, submitInput: submitJsInput, endInput: endJsInput,
+  } = useCodeRunner();
+  const {
+    output: pyOutput, status: pyStatus, runPython, stopPython, clearOutput: clearPy,
+    inputRequest: pyInputRequest, submitInput: submitPyInput, endInput: endPyInput,
+  } = usePython();
 
   const isPythonTab = activeTab?.lang === 'python';
   const consoleOutput = isPythonTab ? pyOutput : jsOutput;
@@ -399,14 +405,32 @@ export default function App() {
   }, []);
 
   // ── Run / debug ──────────────────────────────────────────────────
+  // Files available to `import` (JS/TS) and `import` / `open()` (Python) during a run:
+  // preloaded workspace sources, cached tree contents, then open tabs (newest edits win).
+  const buildRunFiles = useCallback((runningTab) => {
+    const MAX_TOTAL = 5 * 1024 * 1024;
+    const files = {};
+    let total = 0;
+    const add = (path, content) => {
+      if (typeof content !== 'string') return;
+      total += content.length - (files[path]?.length || 0);
+      if (total <= MAX_TOTAL) files[path] = content;
+    };
+    workspaceFiles.forEach(f => add(f.path, f.content));
+    flattenFiles(fileTree).forEach(n => add(n.path, n._content));
+    tabsRef.current.forEach(t => add(t.path, t.content));
+    if (runningTab) add(runningTab.path, runningTab.content);
+    return files;
+  }, [workspaceFiles, fileTree]);
+
   const runTab = useCallback((tab, options = {}) => {
     if (!tab) return null;
     setBottomPanel('console');
-    const opts = { ...options, stdin: stdinLines(stdinText) };
+    const opts = { ...options, stdin: stdinLines(stdinText), path: tab.path, files: buildRunFiles(tab) };
     return tab.lang === 'python'
       ? runPython(tab.content, opts)
       : runJs(tab.content, tab.lang, opts);
-  }, [runPython, runJs, stdinText]);
+  }, [runPython, runJs, stdinText, buildRunFiles]);
 
   const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
 
@@ -757,7 +781,17 @@ export default function App() {
                     onClose={() => setBottomPanel(null)}
                   />
                 )}
-                {bottomPanel === 'console' && <ConsoleOutput lines={consoleOutput} onClear={clearConsole} stdin={stdinText} onStdinChange={setStdinText} />}
+                {bottomPanel === 'console' && (
+                  <ConsoleOutput
+                    lines={consoleOutput}
+                    onClear={clearConsole}
+                    stdin={stdinText}
+                    onStdinChange={setStdinText}
+                    inputRequest={isPythonTab ? pyInputRequest : jsInputRequest}
+                    onSubmitInput={isPythonTab ? submitPyInput : submitJsInput}
+                    onEndInput={isPythonTab ? endPyInput : endJsInput}
+                  />
+                )}
               </div>
             </div>
           )}

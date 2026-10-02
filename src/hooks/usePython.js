@@ -1,5 +1,6 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
 import { appendLines, makeLine } from '../runtime/output';
+import { useStdinRequest } from './useStdinRequest';
 
 const WORKER_URL = '/pyodide.worker.js';
 
@@ -13,6 +14,8 @@ export function usePython() {
   const [status, setStatus]   = useState('idle');
   const workerRef = useRef(null);
   const runRef    = useRef(null); // { id, resolve, onDebugSteps, start }
+  const stdin = useStdinRequest();
+  const { open: openStdin, ask: askStdin, cancel: cancelStdin } = stdin;
 
   const addLines = useCallback((lines) => setOutput(prev => appendLines(prev, lines)), []);
   const addLine  = useCallback((type, text) => addLines([makeLine(type, text)]), [addLines]);
@@ -21,8 +24,9 @@ export function usePython() {
     const run = runRef.current;
     if (!run) return;
     runRef.current = null;
+    cancelStdin();
     run.resolve(result);
-  }, []);
+  }, [cancelStdin]);
 
   const handleMessage = useCallback(({ data }) => {
     if (!data) return;
@@ -39,6 +43,8 @@ export function usePython() {
     if (data.type === 'output') {
       // The worker sends whole lines (blank lines from print() are kept)
       addLines(data.chunks.map(c => makeLine(c.stream === 'stderr' ? 'warn' : c.stream === 'system' ? 'system' : 'log', c.text)));
+    } else if (data.type === 'stdin-request') {
+      askStdin(data.prompt);
     } else if (data.type === 'steps') {
       run.onDebugSteps?.(data.steps);
     } else if (data.type === 'done') {
@@ -55,7 +61,7 @@ export function usePython() {
       setStatus(data.ok ? 'success' : 'error');
       finish({ ok: data.ok, error: data.error });
     }
-  }, [addLine, addLines, finish]);
+  }, [addLine, addLines, finish, askStdin]);
 
   const spawn = useCallback(() => {
     const worker = new Worker(WORKER_URL);
@@ -82,6 +88,7 @@ export function usePython() {
     if (runRef.current) finish({ ok: false, error: 'Superseded by a new run' });
 
     const id = Date.now() + Math.random();
+    const channel = openStdin();
     setOutput([makeLine('system', isReady
       ? '▶ Running Python…'
       : '▶ Loading Python runtime (first run can take a few seconds)…')]);
@@ -89,9 +96,15 @@ export function usePython() {
 
     return new Promise((resolve) => {
       runRef.current = { id, resolve, onDebugSteps: options.onDebugSteps, start: performance.now() };
-      worker.postMessage({ type: 'run', id, code, debug: !!options.debug, stdin: options.stdin || [] });
+      worker.postMessage({
+        type: 'run', id, code, debug: !!options.debug,
+        stdin: options.stdin || [],
+        files: options.files || {},
+        path: options.path,
+        stdinSab: channel?.sab ?? null,
+      });
     });
-  }, [spawn, finish, isReady]);
+  }, [spawn, finish, isReady, openStdin]);
 
   const stopPython = useCallback(() => {
     if (!runRef.current) return;
@@ -108,5 +121,8 @@ export function usePython() {
     setStatus(s => (s === 'running' ? s : 'idle'));
   }, []);
 
-  return { isReady, output, status, runPython, stopPython, clearOutput };
+  return {
+    isReady, output, status, runPython, stopPython, clearOutput,
+    inputRequest: stdin.inputRequest, submitInput: stdin.submit, endInput: stdin.eof,
+  };
 }
