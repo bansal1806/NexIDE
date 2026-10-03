@@ -121,6 +121,7 @@ export default function ProjectTerminal({ project }) {
 
 const STATUS_TEXT = {
   idle: 'Not started',
+  downloading: 'Downloading files…',
   booting: 'Booting Node.js…',
   installing: 'Installing dependencies…',
   starting: 'Starting dev server…',

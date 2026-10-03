@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RefreshCw, ExternalLink, Play, AlertCircle, Loader2, Check } from 'lucide-react';
 
+const DOWNLOAD_STEP = { id: 'downloading', label: 'Download the repository files' };
 const STEPS = [
   { id: 'booting', label: 'Boot Node.js in your browser' },
   { id: 'installing', label: 'Install dependencies' },
@@ -8,7 +9,7 @@ const STEPS = [
 ];
 
 /** Preview of a running project's dev server (served from the in-browser runtime). */
-export default function ProjectPreview({ status, url, error, onStart }) {
+export default function ProjectPreview({ status, url, error, onStart, download = false }) {
   const [path, setPath] = useState('/');
   const [draft, setDraft] = useState('/');
   const [reloadKey, setReloadKey] = useState(0);
@@ -54,7 +55,8 @@ export default function ProjectPreview({ status, url, error, onStart }) {
     );
   }
 
-  const activeIndex = STEPS.findIndex(s => s.id === status);
+  const steps = download ? [DOWNLOAD_STEP, ...STEPS] : STEPS;
+  const activeIndex = steps.findIndex(s => s.id === status);
   return (
     <div className="project-preview-status" id="project-preview-status" aria-live="polite">
       {status === 'error' ? (
@@ -68,7 +70,7 @@ export default function ProjectPreview({ status, url, error, onStart }) {
         <>
           <p className="project-preview-title">Spinning up your project…</p>
           <ol className="project-steps">
-            {STEPS.map((step, i) => (
+            {steps.map((step, i) => (
               <li key={step.id} className={i < activeIndex ? 'done' : i === activeIndex ? 'active' : ''}>
                 {i < activeIndex
                   ? <Check size={14} aria-hidden="true" />
