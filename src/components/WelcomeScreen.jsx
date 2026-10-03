@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion';
 import { FolderOpen, ArrowRight } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
+import { PROJECT_TEMPLATES } from '../projects/templates';
 
 const TEMPLATES = [
   { id: 'js',   emoji: '🍋', label: 'JavaScript', blurb: 'console.log your way in', tone: 'lemon' },
@@ -42,7 +43,7 @@ function Floatie({ shape, tone }) {
   }
 }
 
-export function WelcomeScreen({ onOpenFolder, onOpenGitHub, onNewFile, isSupported }) {
+export function WelcomeScreen({ onOpenFolder, onOpenGitHub, onNewFile, onNewProject, projectsUnsupported, isSupported }) {
   return (
     <div className="welcome-screen" id="welcome-screen">
       <div className="pg-floaties" aria-hidden="true">
@@ -58,8 +59,9 @@ export function WelcomeScreen({ onOpenFolder, onOpenGitHub, onNewFile, isSupport
           <h2 className="pg-wordmark">nexide</h2>
           <p className="pg-tagline">Write it. Run it. <span className="pg-highlight">Rewind it.</span></p>
           <p className="pg-subtitle">
-            A playful browser IDE for JavaScript, TypeScript &amp; Python — with time-travel debugging,
-            live preview and an AI sidekick. Nothing to install.
+            A playful browser IDE for JavaScript, TypeScript &amp; Python — plus full Next.js, React, Vue
+            and Node.js projects running right in your tab. Time-travel debugging, live preview and an AI
+            sidekick. Nothing to install.
           </p>
         </motion.div>
 
@@ -82,6 +84,31 @@ export function WelcomeScreen({ onOpenFolder, onOpenGitHub, onNewFile, isSupport
               </motion.button>
             ))}
           </div>
+        </motion.section>
+
+        <motion.section variants={item} aria-labelledby="pg-project-heading">
+          <h3 className="pg-section-title" id="pg-project-heading">Spin up a full project</h3>
+          <div className="pg-template-grid">
+            {PROJECT_TEMPLATES.map(t => (
+              <motion.button
+                key={t.id}
+                id={`welcome-project-${t.id}`}
+                className={`pg-template pg-template-project pg-tone-${t.tone}`}
+                onClick={() => onNewProject(t)}
+                disabled={!!projectsUnsupported}
+                variants={item}
+                whileTap={{ scale: 0.97 }}
+              >
+                <span className="pg-template-emoji" aria-hidden="true">{t.emoji}</span>
+                <span className="pg-template-label">{t.label}</span>
+                <span className="pg-template-blurb">{t.blurb}</span>
+                <ArrowRight size={16} className="pg-template-arrow" aria-hidden="true" />
+              </motion.button>
+            ))}
+          </div>
+          <p className="pg-section-note">
+            {projectsUnsupported || 'Real Node.js runs inside your browser: npm install, dev server with hot reload, and a shell.'}
+          </p>
         </motion.section>
 
         <motion.section variants={item} aria-labelledby="pg-open-heading">

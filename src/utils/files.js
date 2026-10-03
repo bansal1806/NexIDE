@@ -6,6 +6,8 @@ const EXT_LANG = {
   py: 'python', html: 'html', htm: 'html', css: 'css', scss: 'css',
   json: 'json', md: 'markdown', txt: 'plaintext', sh: 'shell',
   yaml: 'yaml', yml: 'yaml', toml: 'plaintext',
+  vue: 'html', svelte: 'html', astro: 'html', svg: 'xml', xml: 'xml', mdx: 'markdown',
+  less: 'less', sass: 'scss', env: 'plaintext',
 };
 
 export function getLang(filename) {

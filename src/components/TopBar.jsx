@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Play, Square, MessageSquare, Map as MapIcon, TerminalSquare, Settings, FolderOpen, Search, Globe, User, Bug } from 'lucide-react';
+import { Play, Square, MessageSquare, Map as MapIcon, TerminalSquare, Settings, FolderOpen, Search, Globe, User, Bug, RotateCw } from 'lucide-react';
 import { GithubIcon as Github } from './icons';
 
 const LANGUAGES = [
@@ -15,7 +15,42 @@ const LANGUAGES = [
   { id: 'yaml',       label: 'YAML',       color: '#f97316', ext: 'yaml' },
 ];
 
+// Project mode: the status chip next to Start/Stop
+const PROJECT_STATUS = {
+  booting: 'Booting…', installing: 'Installing…', starting: 'Starting…',
+  ready: 'Running', stopped: 'Stopped', error: 'Failed', idle: 'Node.js project',
+};
+
+function ProjectControls({ status, onStart, onStop }) {
+  const live = ['booting', 'installing', 'starting', 'ready'].includes(status);
+  return (
+    <>
+      <span className={`project-chip project-chip-${status}`} id="project-status" role="status">
+        <span className="project-chip-dot" aria-hidden="true" />
+        {PROJECT_STATUS[status] || status}
+      </span>
+      <div className="topbar-divider" aria-hidden="true" />
+      {live && (
+        <button className="btn-icon" id="btn-project-restart" onClick={onStart} aria-label="Restart project" title="Restart (reinstalls if package.json changed)">
+          <RotateCw size={15} />
+        </button>
+      )}
+      <button
+        id="btn-run-code"
+        className={`btn-run ${live && status !== 'ready' ? 'running' : ''}`}
+        onClick={live ? onStop : onStart}
+        aria-label={live ? 'Stop project' : 'Start project (Ctrl+Enter)'}
+        title={live ? 'Stop the dev server' : 'npm install, then npm run dev (Ctrl+Enter)'}
+      >
+        {live ? <Square size={12} fill="currentColor" aria-hidden="true" /> : <Play size={13} fill="currentColor" aria-hidden="true" />}
+        {live ? 'Stop' : 'Start'}
+      </button>
+    </>
+  );
+}
+
 export const TopBar = memo(function TopBar({
+  project,
   language,
   onLanguageChange,
   isRunning,
@@ -60,6 +95,7 @@ export const TopBar = memo(function TopBar({
 
       <div className="topbar-spacer" />
 
+      {project ? <ProjectControls {...project} /> : (<>
       {/* Language Selector */}
       <select
         id="language-select"
@@ -101,6 +137,7 @@ export const TopBar = memo(function TopBar({
         <Bug size={13} aria-hidden="true" />
         Debug
       </button>
+      </>)}
 
       <div className="topbar-divider" aria-hidden="true" />
 
