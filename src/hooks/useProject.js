@@ -4,6 +4,8 @@ import {
   shouldSyncPath, normalizeWatchPath, removedPaths, MAX_SYNC_BYTES,
 } from '../runtime/project';
 import { isBinaryName } from '../utils/files';
+// Runs with Node inside the runtime to gather installed type declarations (editor IntelliSense)
+import collectTypesSource from '../runtime/collectTypes.mjs?raw';
 
 // One WebContainer per page (the API allows a single instance). Loaded on demand: the API
 // boots Node.js inside a hidden StackBlitz iframe and serves dev servers on *.webcontainer-api.io.
@@ -32,13 +34,15 @@ const line = (color, text) => `${color}${text}${C.reset}\r\n`;
  * Runs a Node.js project (Next.js, Vite, Express…) in the in-browser runtime:
  * mount files → npm install → npm run dev → preview URL. Also owns an interactive shell.
  * Files the project itself creates, changes or deletes (generators, npm, the shell) are reported
- * through `onFilesChanged([{ type: 'write' | 'delete', path, content? }])`.
+ * through `onFilesChanged([{ type: 'write' | 'delete', path, content? }])`. After installs, the
+ * installed packages' type declarations are reported through `onTypes(files, tsconfigText)`.
  *
  * status: 'idle' | 'booting' | 'installing' | 'starting' | 'ready' | 'stopped' | 'error'
  */
-export function useProject({ onFilesChanged } = {}) {
+export function useProject({ onFilesChanged, onTypes } = {}) {
   const onFilesChangedRef = useRef(onFilesChanged);
-  useEffect(() => { onFilesChangedRef.current = onFilesChanged; });
+  const onTypesRef = useRef(onTypes);
+  useEffect(() => { onFilesChangedRef.current = onFilesChanged; onTypesRef.current = onTypes; });
   const [state, setState] = useState({ status: 'idle', url: null, port: null, error: null });
   const [output] = useState(() => new OutputLog());
   const [shellOutput] = useState(() => new OutputLog());
@@ -74,6 +78,36 @@ export function useProject({ onFilesChanged } = {}) {
     }
     return wc;
   }, [output]);
+
+  // ── Installed types → editor ─────────────────────────────────────
+  const typesTimer = useRef(null);
+  const loadTypes = useCallback(async () => {
+    const wc = container.current;
+    if (!wc || !mounted.current) return;
+    const id = runId.current;
+    try {
+      await wc.fs.writeFile('.nexide-types.mjs', collectTypesSource);
+      const collector = await wc.spawn('node', ['.nexide-types.mjs']);
+      if ((await collector.exit) !== 0) throw new Error('the type collector failed');
+      const { files, truncated } = JSON.parse(await wc.fs.readFile('.nexide-types.json', 'utf-8'));
+      const tsconfig = await wc.fs.readFile('tsconfig.json', 'utf-8')
+        .catch(() => wc.fs.readFile('jsconfig.json', 'utf-8'))
+        .catch(() => null);
+      if (id !== runId.current || !mounted.current) return;
+      const count = Object.keys(files).length;
+      output.append(line(C.dim, `IntelliSense: loaded ${count} type files from node_modules${truncated ? ' (size limit reached)' : ''}.`));
+      onTypesRef.current?.(files, tsconfig);
+    } catch (e) {
+      output.append(line(C.dim, `IntelliSense: could not load package types (${e?.message || e}).`));
+    } finally {
+      wc.fs.rm('.nexide-types.mjs', { force: true }).catch(() => {});
+      wc.fs.rm('.nexide-types.json', { force: true }).catch(() => {});
+    }
+  }, [output]);
+  const scheduleTypes = useCallback(() => {
+    clearTimeout(typesTimer.current);
+    typesTimer.current = setTimeout(loadTypes, 2000); // npm finishes writing node_modules first
+  }, [loadTypes]);
 
   // ── Runtime → workspace file sync ────────────────────────────────
   const stopWatching = useCallback(() => {
@@ -122,7 +156,9 @@ export function useProject({ onFilesChanged } = {}) {
     };
     for (const path of queued) await visit(path);
     if (changes.length && mounted.current) onFilesChangedRef.current?.(changes);
-  }, []);
+    // Dependencies or compiler options changed (e.g. `npm i zod` in the shell): refresh the types
+    if (changes.some(c => /^(package|tsconfig|jsconfig).json$/.test(c.path))) scheduleTypes();
+  }, [scheduleTypes]);
 
   // Safety net for missed watch events: compare the whole project with what we know.
   // Runs after each shell command and on the explorer's Refresh.
@@ -223,6 +259,7 @@ export function useProject({ onFilesChanged } = {}) {
       const dev = await wc.spawn('npm', ['run', script]);
       processes.current.add(dev);
       pipe(dev, isCurrent);
+      loadTypes(); // alongside the dev server starting
       dev.exit.then((exitCode) => {
         processes.current.delete(dev);
         if (!isCurrent()) return;
@@ -236,7 +273,7 @@ export function useProject({ onFilesChanged } = {}) {
     } catch (e) {
       if (isCurrent()) fail(e?.message || String(e));
     }
-  }, [getContainer, killRun, output, pipe, stopWatching, startWatching]);
+  }, [getContainer, killRun, output, pipe, stopWatching, startWatching, loadTypes]);
 
   const stop = useCallback(() => {
     runId.current++;
@@ -250,6 +287,7 @@ export function useProject({ onFilesChanged } = {}) {
     runId.current++;
     killRun();
     stopWatching();
+    clearTimeout(typesTimer.current);
     mounted.current = false;
     synced.current = new Map();
     pendingWrites.current.forEach(clearTimeout);
@@ -309,7 +347,12 @@ export function useProject({ onFilesChanged } = {}) {
   const shellInput = useCallback((data) => { shell.current?.writer.write(data); }, []);
   const resizeShell = useCallback((size) => { shell.current?.process.resize(size); }, []);
 
-  useEffect(() => () => { killRun(); stopWatching(); clearTimeout(rescanTimer.current); }, [killRun, stopWatching]);
+  useEffect(() => () => {
+    killRun();
+    stopWatching();
+    clearTimeout(rescanTimer.current);
+    clearTimeout(typesTimer.current);
+  }, [killRun, stopWatching]);
 
   return {
     ...state,
