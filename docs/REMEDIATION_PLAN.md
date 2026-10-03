@@ -205,6 +205,33 @@ runner, so pixel diffs would be noisy.
 - [x] New welcome screen (template cards, open folder / GitHub, shortcut chips).
 - Verification: lint clean · unit 92/92 · E2E 55/55 (twice, incl. axe).
 
+## Phase 12 — Full Node.js projects in the browser (WebContainers)
+
+Goal: run real Next.js / React / Vue / Node projects — `npm install`, dev server, shell — inside the tab,
+with no servers of ours. Runtime: StackBlitz WebContainers (`@webcontainer/api`). **Licensing:** free to
+prototype; for-profit production use needs a commercial license from StackBlitz (**[YOU]**).
+
+Spike findings (headless Edge, COEP `credentialless`): Vite ✅ · Express ✅ · Next.js 14 ✅ · Next.js 15.3–15.4 ✅ ·
+Next.js 15.5+ / 16 ❌ (page render hits Next's async-storage invariants; API routes still work) ·
+Turbopack ❌ (needs native binaries). Templates pin `next@15.4.11`; newer versions get a warning.
+
+### 12.1 Project mode ✅ (branch `project-mode`)
+- [x] Runtime hook `useProject`: lazy single WebContainer, mount → `npm install` → dev script → preview URL;
+  keeps `node_modules` when package.json is unchanged; Stop / Restart; compatibility warnings.
+- [x] Starter templates: Next.js (App Router + API route), React + Vite, Vue + Vite, Express API.
+- [x] Any workspace with a root `package.json` runs as a project (starter, local folder, cloud project).
+- [x] Terminal: xterm with dev-server output and an interactive `jsh` shell (`npm`, `node`, `ls`…).
+- [x] Preview: dev-server iframe with address bar, reload, open in new tab; progress steps while starting.
+- [x] Editor changes sync into the runtime (debounced) → hot reload.
+- [x] CSP: `frame-src` adds only `https://stackblitz.com` and `https://*.webcontainer-api.io` (e2e-enforced).
+- Verification: lint clean · unit 99/99 · E2E 63/63 (incl. React start/HMR/shell/stop, Next.js page/API/edit, axe).
+
+### Next steps
+- 12.2 Files created in the runtime (generators, `npm i` lockfiles) appear in the explorer; save back to disk.
+- 12.3 IntelliSense from the project's own `node_modules` types; TypeScript templates.
+- 12.4 Run GitHub repos as projects (bulk file fetch); more templates (Svelte, Astro, Remix).
+- 12.5 Persist `node_modules` between visits for faster restarts.
+
 ## Ideas for a later phase
 
 - Screen-reader announcements for run results (polite live region summarising "Completed in 12 ms" / errors).
