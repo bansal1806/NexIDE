@@ -79,6 +79,11 @@ try {
     }, BASE);
     check('CSP: app is strict (same-origin scripts only, no CDN, no framing)',
       /script-src 'self';/.test(app) && !/jsdelivr/.test(app) && /frame-ancestors 'none'/.test(app));
+    // Frames: our preview page plus the Node.js runtime (StackBlitz) and its dev-server previews only
+    const frameSrc = app.match(/frame-src ([^;]*)/)?.[1].trim().split(/\s+/) || [];
+    const allowedFrames = ["'self'", 'https://stackblitz.com', 'https://*.webcontainer-api.io'];
+    check('CSP: frames limited to the app and the project runtime',
+      frameSrc.length > 0 && frameSrc.every(s => allowedFrames.includes(s)), frameSrc.join(' '));
     check('CSP: preview host is permissive but frameable only by the app',
       /'unsafe-inline'/.test(await csp('/preview.html')) && /frame-ancestors 'self'/.test(await csp('/preview.html')));
     check('CSP: runner worker allows eval only for itself',
@@ -564,6 +569,88 @@ try {
     }
   }
 
+  // ── Node.js projects in the in-browser runtime (WebContainers; needs network) ──
+  {
+    const previewText = async () => {
+      const src = await page.getAttribute('#project-preview-frame', 'src').catch(() => null);
+      const frame = src && page.frames().find(f => f.url().startsWith(new URL(src).origin));
+      return frame ? frame.evaluate(() => document.body?.innerText || '').catch(() => '') : '';
+    };
+    const waitPreview = async (re, timeout) => {
+      const end = Date.now() + timeout;
+      let text = '';
+      while (Date.now() < end) {
+        text = await previewText();
+        if (re.test(text)) return { ok: true, text };
+        await page.waitForTimeout(1000);
+      }
+      return { ok: false, text };
+    };
+    const terminalText = (id) => page.evaluate((sel) => document.querySelector(`${sel} .xterm-rows`)?.innerText || '', id);
+    const startProject = async (id) => {
+      await page.goto(BASE);
+      await page.click(`#welcome-project-${id}`);
+      await editorReady();
+      await page.waitForTimeout(500);
+      const idle = (await page.textContent('#btn-run-code'))?.trim();
+      const started = Date.now();
+      await run();
+      const ready = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Running', null, { timeout: 300000 }).then(() => true, () => false);
+      return { idle, ready, secs: Math.round((Date.now() - started) / 1000) };
+    };
+
+    // React + Vite: install, dev server, hot reload, shell, stop
+    const react = await startProject('react');
+    const rendered = await waitPreview(/Hello from React/, 60000);
+    check('Project: React + Vite installs, starts and renders in the preview',
+      react.idle === 'Start' && react.ready && rendered.ok,
+      `${react.secs}s · ${rendered.ok ? 'rendered' : `preview: ${JSON.stringify(rendered.text.slice(0, 80))} · output: ${(await terminalText('#project-output')).replace(/\s+/g, ' ').slice(-200)}`}`);
+
+    await page.evaluate(() => {
+      const editor = window.monaco.editor.getEditors()[0];
+      editor.setValue(editor.getValue().replace('Hello from React', 'Hot reloaded!'));
+    });
+    const hot = await waitPreview(/Hot reloaded!/, 30000);
+    check('Project: editor changes hot-reload the preview', hot.ok, JSON.stringify(hot.text.slice(0, 60)));
+
+    await page.click('#term-tab-shell');
+    await page.waitForSelector('#project-shell .xterm', { timeout: 10000 });
+    await page.waitForFunction(() => /❯|\$/.test(document.querySelector('#project-shell .xterm-rows')?.innerText || ''), null, { timeout: 30000 }).catch(() => {});
+    await page.keyboard.type('node -e "console.log(6 * 7)"\n');
+    const shellOk = await page.waitForFunction(() => /\b42\b/.test(document.querySelector('#project-shell .xterm-rows')?.innerText || ''), null, { timeout: 30000 }).then(() => true, () => false);
+    check('Project: interactive shell runs node', shellOk, shellOk ? '' : (await terminalText('#project-shell')).replace(/\s+/g, ' ').slice(-120));
+
+    await run(); // Stop
+    const stopped = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Stopped', null, { timeout: 15000 }).then(() => true, () => false);
+    check('Project: Stop ends the dev server', stopped && !(await page.$('#project-preview-frame')));
+
+    // Next.js: Server Component page, API route, edit → recompile
+    const next = await startProject('next');
+    const nextPage = await waitPreview(/Hello from Next\.js[\s\S]*Rendered on the server/, 120000);
+    check('Project: Next.js renders a Server Component page', next.ready && nextPage.ok,
+      `${next.secs}s${nextPage.ok ? '' : ` · preview: ${JSON.stringify(nextPage.text.slice(0, 80))} · output: ${(await terminalText('#project-output')).replace(/\s+/g, ' ').slice(-200)}`}`);
+    await page.fill('#project-preview-path', '/api/hello');
+    await page.press('#project-preview-path', 'Enter');
+    const api = await waitPreview(/Hello from a Next\.js API route/, 90000);
+    check('Project: Next.js API route responds', api.ok, JSON.stringify(api.text.slice(0, 80)));
+    await page.fill('#project-preview-path', '/');
+    await page.press('#project-preview-path', 'Enter');
+    await waitPreview(/Hello from Next\.js/, 60000);
+    await page.evaluate(() => {
+      const editor = window.monaco.editor.getEditors()[0];
+      editor.setValue(editor.getValue().replace('Hello from Next.js', 'Edited Next page'));
+    });
+    // Fast Refresh usually applies it; reload as a fallback (an edit right after the first render
+    // can land before Next's HMR socket connects)
+    let edited = await waitPreview(/Edited Next page/, 30000);
+    if (!edited.ok) {
+      await page.click('button[aria-label="Reload preview"]');
+      edited = await waitPreview(/Edited Next page/, 60000);
+    }
+    check('Project: Next.js picks up edits', edited.ok, JSON.stringify(edited.text.slice(0, 60)));
+    await run(); // Stop
+  }
+
   // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
   {
     await page.focus('#btn-topbar-settings');
@@ -623,6 +710,15 @@ try {
       await a.click('#btn-close-github');
       await a.keyboard.press('Control+p');
       await audit('command palette');
+      await a.keyboard.press('Escape');
+      // Project mode (not started: no network needed): status chip, terminal, preview placeholder
+      await a.goto(BASE);
+      await a.click('#welcome-project-react');
+      await a.waitForFunction(() => window.monaco?.editor.getEditors().length > 0, null, { timeout: 30000 });
+      await a.click('#btn-toggle-preview');
+      await a.click('.activity-btn[aria-label="Terminal"]');
+      await a.waitForSelector('#project-output .xterm', { timeout: 10000 }).catch(() => {});
+      await audit('project mode');
     } finally {
       await a11yContext.close();
     }
