@@ -37,7 +37,12 @@ const pyodideCoreRequests = [];
 page.on('request', r => { if (/pyodide\.asm\.(js|wasm)|python_stdlib\.zip/.test(r.url())) pyodideCoreRequests.push(r.url()); });
 const cdnMonacoRequests = [];
 page.on('request', r => { if (/monaco-editor/.test(r.url()) && !r.url().startsWith(new URL(BASE).origin)) cdnMonacoRequests.push(r.url()); });
-page.on('console', m => { if (m.type() === 'error') pageErrors.push(`console: ${m.text()}`); });
+page.on('console', m => {
+  if (m.type() !== 'error') return;
+  // A running project's own app (preview iframe / runtime frame) isn't NexIDE
+  if (/webcontainer-api\.io|stackblitz\.com/.test(m.location()?.url || '')) return;
+  pageErrors.push(`console: ${m.text()}`);
+});
 // CSP violations anywhere in the page (workers report through console errors)
 await page.addInitScript(() => {
   document.addEventListener('securitypolicyviolation', e => {
@@ -619,6 +624,19 @@ try {
     await page.keyboard.type('node -e "console.log(6 * 7)"\n');
     const shellOk = await page.waitForFunction(() => /\b42\b/.test(document.querySelector('#project-shell .xterm-rows')?.innerText || ''), null, { timeout: 30000 }).then(() => true, () => false);
     check('Project: interactive shell runs node', shellOk, shellOk ? '' : (await terminalText('#project-shell')).replace(/\s+/g, ' ').slice(-120));
+
+    // Files the project creates / deletes show up in the explorer (npm's lockfile, shell commands)
+    const treeNames = () => page.$$eval('#sidebar .file-tree-name', els => els.map(e => e.textContent.trim()));
+    const treeHas = (want, notWant = []) => page.waitForFunction(({ want, notWant }) => {
+      const names = [...document.querySelectorAll('#sidebar .file-tree-name')].map(e => e.textContent.trim());
+      return want.every(n => names.filter(x => x === n).length === 1) && notWant.every(n => !names.includes(n));
+    }, { want, notWant }, { timeout: 15000 }).then(() => true, () => false);
+    await page.keyboard.type('mkdir -p src/lib && echo "export const answer = 42;" > src/lib/answer.js && echo "todo" > notes.txt\n');
+    const created = await treeHas(['lib', 'notes.txt', 'package-lock.json']);
+    await page.keyboard.type('rm notes.txt\n');
+    const deleted = await treeHas(['lib'], ['notes.txt']);
+    check('Project: files created or deleted by the project appear in the explorer', created && deleted,
+      `created=${created} deleted=${deleted} · ${(await treeNames()).join(', ')}`);
 
     await run(); // Stop
     const stopped = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Stopped', null, { timeout: 15000 }).then(() => true, () => false);
