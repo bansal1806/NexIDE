@@ -87,6 +87,11 @@ export default function ProjectTerminal({ project }) {
           Shell
         </button>
         <div style={{ flex: 1 }} />
+        {project.depsFromCache && (
+          <span className="project-cached-badge" id="project-deps-cached" title="node_modules came from an earlier visit, so nothing had to be downloaded again">
+            ⚡ Dependencies restored
+          </span>
+        )}
         <span className="console-line-count">{STATUS_TEXT[project.status]}</span>
       </div>
       <div className="project-terminal-body" role="tabpanel">

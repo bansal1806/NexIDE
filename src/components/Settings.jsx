@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useDialog } from '../hooks/useDialog';
-import { X, Key, Sliders, Type, Save, Eye, EyeOff } from 'lucide-react';
+import { X, Key, Sliders, Type, Save, Eye, EyeOff, Package, Trash2 } from 'lucide-react';
+import { listSnapshots, clearSnapshots } from '../runtime/depsCache';
 import { GithubIcon as Github } from './icons';
 
 const THEMES = [
@@ -10,6 +11,42 @@ const THEMES = [
   { id: 'crimson',     label: 'Sunset',     preview: 'linear-gradient(120deg, #ffd97a, #ffb07a, #ff9fc0)' },
   { id: 'vs-dark',     label: 'Classic',    preview: '#3c3c3c' },
 ];
+
+/** Saved node_modules snapshots (projects restart without reinstalling); clearable. */
+function DependencyCache() {
+  const [usage, setUsage] = useState(null); // { count, bytes } once known
+  useEffect(() => {
+    let cancelled = false;
+    listSnapshots()
+      .then(list => { if (!cancelled) setUsage({ count: list.length, bytes: list.reduce((sum, e) => sum + e.size, 0) }); })
+      .catch(() => { if (!cancelled) setUsage({ count: 0, bytes: 0 }); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const clear = async () => {
+    await clearSnapshots().catch(() => {});
+    setUsage({ count: 0, bytes: 0 });
+  };
+
+  return (
+    <>
+      <div className="settings-toggle-row">
+        <span className="settings-label" style={{ margin: 0 }} id="settings-deps-usage">
+          {usage == null ? 'Saved dependencies: …'
+            : usage.count ? `Saved dependencies: ${usage.count} project${usage.count === 1 ? '' : 's'}, ${(usage.bytes / 1048576).toFixed(0)} MB`
+            : 'No saved dependencies'}
+        </span>
+        <button className="btn-modal-secondary" id="btn-clear-deps-cache" onClick={clear} disabled={!usage?.count}>
+          <Trash2 size={12} aria-hidden="true" /> Clear
+        </button>
+      </div>
+      <p className="settings-hint">
+        After installing, a project's <code>node_modules</code> is kept in this browser, so the next start skips the
+        download. The least recently used are removed beyond 3 projects or 600 MB.
+      </p>
+    </>
+  );
+}
 
 export function Settings({ open, ...props }) {
   if (!open) return null;
@@ -147,6 +184,14 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
               Off: keys are kept only until this tab is closed. Either way they're encrypted with a
               non-extractable key and never leave this browser.
             </p>
+          </div>
+
+          {/* Projects Section */}
+          <div className="settings-section">
+            <div className="settings-section-title">
+              <Package size={12} /> Projects
+            </div>
+            <DependencyCache />
           </div>
 
           {/* Editor Section */}

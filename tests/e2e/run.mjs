@@ -653,6 +653,25 @@ try {
     const stopped = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Stopped', null, { timeout: 15000 }).then(() => true, () => false);
     check('Project: Stop ends the dev server', stopped && !(await page.$('#project-preview-frame')));
 
+    // Next visit: the installed dependencies were saved (in the background) and are restored
+    const saved = await page.waitForFunction(() => new Promise(resolve => {
+      const req = indexedDB.open('nexide-deps');
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('snapshots')) { db.close(); return resolve(false); }
+        const count = db.transaction('snapshots').objectStore('snapshots').count();
+        count.onsuccess = () => { db.close(); resolve(count.result > 0); };
+      };
+      req.onerror = () => resolve(false);
+    }), null, { timeout: 120000, polling: 1000 }).then(() => true, () => false);
+    const again = await startProject('react');
+    const restoredBadge = !!(await page.$('#project-deps-cached'));
+    const againRendered = await waitPreview(/Hello from React/, 60000);
+    check('Project: dependencies are kept between visits (restart without reinstalling)',
+      saved && again.ready && restoredBadge && againRendered.ok,
+      `saved=${saved} restored=${restoredBadge} · first start ${react.secs}s, next visit ${again.secs}s`);
+    await run(); // Stop
+
     // Next.js: Server Component page, API route, edit → recompile
     const next = await startProject('next');
     const nextPage = await waitPreview(/Hello from Next\.js[\s\S]*Rendered on the server/, 120000);

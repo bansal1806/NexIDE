@@ -4,6 +4,7 @@ import {
   shouldSyncPath, normalizeWatchPath, removedPaths, MAX_SYNC_BYTES,
 } from '../runtime/project';
 import { isBinaryName } from '../utils/files';
+import { dependencyKey, loadSnapshot, saveSnapshot } from '../runtime/depsCache';
 // Runs with Node inside the runtime to gather installed type declarations (editor IntelliSense)
 import collectTypesSource from '../runtime/collectTypes.mjs?raw';
 
@@ -29,6 +30,30 @@ export function projectRuntimeUnsupportedReason() {
 
 const C = { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', reset: '\x1b[0m' };
 const line = (color, text) => `${color}${text}${C.reset}\r\n`;
+const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
+
+// Runs with Node in the runtime after restoring node_modules: every .bin entry's target → 0755
+const RESTORE_BIN_MODES = `
+const fs = require('fs'), path = require('path');
+const dirs = (dir) => { try { return fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()); } catch { return []; } };
+const visitNodeModules = (nm, depth) => {
+  const bin = path.join(nm, '.bin');
+  if (fs.existsSync(bin)) {
+    for (const name of fs.readdirSync(bin)) {
+      try { fs.chmodSync(fs.realpathSync(path.join(bin, name)), 0o755); } catch {}
+    }
+  }
+  if (depth >= 6) return;
+  for (const entry of dirs(nm)) {
+    const packages = entry.name.startsWith('@') ? dirs(path.join(nm, entry.name)).map(p => path.join(nm, entry.name, p.name)) : [path.join(nm, entry.name)];
+    for (const pkg of packages) {
+      const nested = path.join(pkg, 'node_modules');
+      if (fs.existsSync(nested)) visitNodeModules(nested, depth + 1);
+    }
+  }
+};
+visitNodeModules('node_modules', 0);
+`;
 
 /**
  * Runs a Node.js project (Next.js, Vite, Express…) in the in-browser runtime:
@@ -264,6 +289,34 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
 
       compatibilityWarnings(pkg).forEach(w => output.append(line(C.yellow, `⚠ ${w}`)));
 
+      // Dependencies installed on an earlier visit: restore them; npm install then only verifies
+      const userLockfile = files.find(f => f.path === 'package-lock.json')?.content ?? null;
+      const depsKey = await dependencyKey(pkg, userLockfile).catch(() => null);
+      let restored = false;
+      if (!keep.size && depsKey) {
+        const cached = await loadSnapshot(depsKey).catch(() => null);
+        if (cached && isCurrent()) {
+          try {
+            output.append(line(C.dim, `Restoring dependencies installed earlier (${mb(cached.snapshot.byteLength)})…`));
+            await wc.fs.mkdir('node_modules', { recursive: true });
+            await wc.mount(cached.snapshot, { mountPoint: 'node_modules' });
+            if (!userLockfile && cached.lockfile) await wc.fs.writeFile('package-lock.json', cached.lockfile);
+            // Snapshots don't keep executable bits: mark package binaries (vite, next…) executable again
+            const fixBins = await wc.spawn('node', ['-e', RESTORE_BIN_MODES]);
+            processes.current.add(fixBins);
+            const fixed = await fixBins.exit;
+            processes.current.delete(fixBins);
+            if (fixed !== 0) throw new Error(`restoring executable files failed (${fixed})`);
+            restored = true;
+            setState(s => ({ ...s, depsFromCache: true }));
+          } catch (e) {
+            output.append(line(C.dim, `Could not restore them (${e?.message || e}); installing instead.`));
+            await wc.fs.rm('node_modules', { recursive: true, force: true }).catch(() => {});
+          }
+        }
+        if (!isCurrent()) return;
+      }
+
       setState(s => ({ ...s, status: 'installing' }));
       output.append(line(C.cyan, '$ npm install'));
       const install = await wc.spawn('npm', ['install']);
@@ -277,6 +330,18 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
         return fail(`npm install failed (exit code ${code}). See the output above.`);
       }
       installedFor.current = pkgText;
+
+      // Keep this install for the next visit (in the background; never blocks starting)
+      if (depsKey && !restored) {
+        (async () => {
+          const snapshot = await wc.export('node_modules', { format: 'binary' });
+          const lockfile = await wc.fs.readFile('package-lock.json', 'utf-8').catch(() => null);
+          await saveSnapshot(depsKey, snapshot, { lockfile, label: pkg.name || '' });
+          if (isCurrent()) output.append(line(C.dim, `Saved the installed dependencies for next time (${mb(snapshot.byteLength)}).`));
+        })().catch(e => {
+          if (isCurrent()) output.append(line(C.dim, `Could not keep the dependencies for next time (${e?.message || e}).`));
+        });
+      }
 
       setState(s => ({ ...s, status: 'starting' }));
       output.append(line(C.cyan, `$ npm run ${script}`));
