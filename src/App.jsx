@@ -24,6 +24,7 @@ import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { useCelebrate }       from './hooks/useCelebrate';
 import { useProject, projectRuntimeUnsupportedReason } from './hooks/useProject';
 import { findNodeByPath }     from './utils/files';
+import { summarizeRun, projectAnnouncement } from './utils/announce';
 import { stdinLines }         from './runtime/output';
 
 // Components
@@ -155,6 +156,11 @@ export default function App() {
     : ((isPythonTab ? pyStatus : jsStatus) || 'idle');
   const isRunning = jsStatus === 'running' || pyStatus === 'running';
   useCelebrate(runStatus);
+
+  // Screen-reader summary of what just happened (the console and terminals themselves stay quiet)
+  const announcement = projectActive
+    ? projectAnnouncement(project.status, { error: project.error, depsFromCache: project.depsFromCache })
+    : summarizeRun(consoleOutput, runStatus);
 
   // ── AI ───────────────────────────────────────────────────────────
   const gemini = useGemini({ apiKey: settings.geminiApiKey });
@@ -504,6 +510,8 @@ export default function App() {
         )}
 
       </div>
+
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" id="announcer">{announcement}</div>
 
       <StatusBar
         language={activeTab?.lang || ''}
