@@ -679,6 +679,45 @@ try {
     check('Project: Next.js picks up edits', edited.ok, JSON.stringify(edited.text.slice(0, 60)));
     await run(); // Stop
 
+    // A GitHub repo runs as a project: its text files are downloaded, then installed and started.
+    // GitHub itself is mocked (no rate limits, deterministic); everything after the download is real.
+    {
+      const repoFiles = {
+        'package.json': JSON.stringify({ name: 'gh-demo', private: true, type: 'module', scripts: { dev: 'vite' }, devDependencies: { vite: '^6.3.0' } }),
+        'index.html': '<!doctype html><html><body><h1>Hello from a GitHub repo</h1><script type="module" src="/main.js"></script></body></html>',
+        'main.js': "document.body.insertAdjacentHTML('beforeend', '<p>JS ran</p>');",
+      };
+      const tree = [
+        ...Object.entries(repoFiles).map(([path, content]) => ({ path, type: 'blob', size: content.length })),
+        { path: 'assets', type: 'tree' },
+        { path: 'assets/logo.png', type: 'blob', size: 2048 },        // binary: never downloaded
+        { path: 'data.json', type: 'blob', size: 3 * 1024 * 1024 },    // too big: never downloaded
+      ];
+      const rawRequests = [];
+      await page.route('https://api.github.com/repos/e2e/demo', r => r.fulfill({ json: { default_branch: 'main' } }));
+      await page.route('https://api.github.com/repos/e2e/demo/git/trees/**', r => r.fulfill({ json: { tree, truncated: false } }));
+      await page.route('https://raw.githubusercontent.com/e2e/demo/main/**', r => {
+        const path = new URL(r.request().url()).pathname.split('/main/')[1];
+        rawRequests.push(path);
+        return repoFiles[path] !== undefined ? r.fulfill({ body: repoFiles[path], contentType: 'text/plain' }) : r.fulfill({ status: 404 });
+      });
+      await page.goto(BASE);
+      await page.click('#welcome-btn-open-github');
+      await page.fill('#github-repo-input', 'e2e/demo');
+      await page.click('#btn-load-github-repo');
+      await page.waitForSelector('#github-modal', { state: 'detached', timeout: 15000 });
+      await page.waitForFunction(() => document.querySelector('#btn-run-code')?.textContent.trim() === 'Start', null, { timeout: 15000 });
+      const started = Date.now();
+      await run();
+      const ready = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Running', null, { timeout: 300000 }).then(() => true, () => false);
+      const ghRendered = await waitPreview(/Hello from a GitHub repo[\s\S]*JS ran/, 60000);
+      check('Project: a GitHub repo downloads its files and runs',
+        ready && ghRendered.ok && rawRequests.sort().join(',') === 'index.html,main.js,package.json',
+        `${Math.round((Date.now() - started) / 1000)}s · downloaded: ${rawRequests.join(', ')}${ghRendered.ok ? '' : ` · preview: ${JSON.stringify(ghRendered.text.slice(0, 60))}`}`);
+      await run(); // Stop
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    }
+
     // TypeScript project: the installed packages' types power editor diagnostics and completions
     const tsDiagnostics = (path) => page.evaluate(async (path) => {
       const ts = window.monaco.typescript ?? window.monaco.languages.typescript;

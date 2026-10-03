@@ -74,6 +74,37 @@ export async function fetchFileContent(owner, repo, path, branch, token = null) 
   return data.content;
 }
 
+const RAW = 'https://raw.githubusercontent.com';
+
+async function fetchRawFile(owner, repo, branch, path) {
+  const res = await fetch(`${RAW}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodePath(branch)}/${encodePath(path)}`);
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.text();
+}
+
+/**
+ * Download many text files of a repo (running it as a project). Public repos use
+ * raw.githubusercontent.com, which has no API rate limit; with a token, the authenticated contents
+ * API (5,000 requests/hour, works for private repos). Resolves to `[{ path, content }]`.
+ */
+export async function fetchRepoFiles({ owner, repo, branch }, paths, token = null, { concurrency = 8, onProgress } = {}) {
+  const results = [];
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    while (next < paths.length) {
+      const path = paths[next++];
+      const content = token
+        ? await fetchFileContent(owner, repo, path, branch, token)
+        : await fetchRawFile(owner, repo, branch, path);
+      results.push({ path, content });
+      onProgress?.(++done, paths.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, worker));
+  return results;
+}
+
 export function buildTreeFromFlat(flatItems) {
   // Build directory tree from flat GitHub tree items
   const root = [];

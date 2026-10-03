@@ -1,9 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useFileSystem } from './useFileSystem';
 import { useMonacoWorkspace } from './useMonacoWorkspace';
-import { fetchFileContent } from '../services/github';
+import { fetchFileContent, fetchRepoFiles } from '../services/github';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud, deleteFileFromCloud } from '../services/db';
-import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath, isBinaryName } from '../utils/files';
+import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath, isBinaryName, withFileChanges } from '../utils/files';
+import { shouldSyncPath, MAX_SYNC_BYTES } from '../runtime/project';
 import { STARTERS } from '../components/starters';
 import { PROJECT_TEMPLATES, templateFiles } from '../projects/templates';
 
@@ -13,10 +14,14 @@ const TEMPLATES = {
   html: { file: 'index.html', lang: 'html' },
   ts:   { file: 'main.ts',    lang: 'typescript' },
 };
+// Running a GitHub repo as a project downloads its text files; beyond this it's too big for a tab
+const MAX_REPO_FILES = 1500;
+const MAX_REPO_BYTES = 30 * 1024 * 1024;
+
 // File each project template opens first
 const PROJECT_ENTRY = {
   next: 'app/page.jsx', 'next-ts': 'app/page.tsx', react: 'src/App.jsx', 'react-ts': 'src/App.tsx',
-  vue: 'src/App.vue', express: 'server.js',
+  vue: 'src/App.vue', svelte: 'src/App.svelte', astro: 'src/pages/index.astro', express: 'server.js',
 };
 
 let tabIdCounter = 1;
@@ -267,14 +272,15 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
 
   // Files available to `import` (JS/TS) and `import` / `open()` (Python) during a run:
   // preloaded workspace sources, cached tree contents, then open tabs (newest edits win).
-  const buildRunFiles = useCallback((runningTab) => {
-    const MAX_TOTAL = 5 * 1024 * 1024;
+  const buildRunFiles = useCallback((runningTab, { maxTotal = 5 * 1024 * 1024 } = {}) => {
     const files = {};
     let total = 0;
     const add = (path, content) => {
       if (typeof content !== 'string') return;
-      total += content.length - (files[path]?.length || 0);
-      if (total <= MAX_TOTAL) files[path] = content;
+      const grown = total + content.length - (files[path]?.length || 0);
+      if (grown > maxTotal) return;
+      total = grown;
+      files[path] = content;
     };
     workspaceFiles.forEach(f => add(f.path, f.content));
     flattenFiles(fileTree).forEach(n => add(n.path, n._content));
@@ -391,12 +397,30 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     return true;
   }, [confirmDiscard, resetWorkspace]);
 
+  // A GitHub repo only loads file contents on demand: running it downloads the rest first
+  const downloadRepoFiles = useCallback(async (onProgress) => {
+    const missing = flattenFiles(githubTree).filter(n =>
+      typeof n._content !== 'string' &&
+      shouldSyncPath(n.path, isBinaryName) &&
+      (n.githubItem?.size ?? 0) <= MAX_SYNC_BYTES);
+    const bytes = missing.reduce((sum, n) => sum + (n.githubItem?.size ?? 0), 0);
+    if (missing.length > MAX_REPO_FILES || bytes > MAX_REPO_BYTES) {
+      throw new Error(`This repository is too large to run in the browser (${missing.length} files, ${(bytes / 1048576).toFixed(1)} MB; ` +
+        `the limit is ${MAX_REPO_FILES} files / ${MAX_REPO_BYTES / 1048576} MB). Open a smaller project or a local folder.`);
+    }
+    const downloaded = await fetchRepoFiles(githubInfo, missing.map(n => n.path), githubToken, { onProgress });
+    // Cache on the tree nodes, so opening those files later needs no request
+    const byPath = new Map(downloaded.map(f => [f.path, f.content]));
+    for (const node of missing) if (byPath.has(node.path)) node._content = byPath.get(node.path);
+    return downloaded;
+  }, [githubTree, githubInfo, githubToken]);
+
   /** Every known file of the workspace as `{ path, content }` (open tabs' live edits win). */
-  const projectFiles = useCallback(() => {
-    const live = liveActiveTab();
-    const files = buildRunFiles(live);
+  const projectFiles = useCallback(async (onProgress) => {
+    if (githubMode && githubInfo) await downloadRepoFiles(onProgress);
+    const files = buildRunFiles(liveActiveTab(), { maxTotal: 64 * 1024 * 1024 });
     return Object.entries(files).map(([path, content]) => ({ path, content }));
-  }, [buildRunFiles, liveActiveTab]);
+  }, [githubMode, githubInfo, downloadRepoFiles, buildRunFiles, liveActiveTab]);
 
   // ── Files changed by a running project (generators, npm, the shell) ──
   // changes: [{ type: 'write' | 'delete', path, content? }]
@@ -435,6 +459,9 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     try {
       if (starterProject) {
         setGithubTree(buildTreeFromPaths(nextFiles));
+      } else if (githubMode) {
+        // Read-only on GitHub: the changes live in NexIDE (and the running project) only
+        setGithubTree(tree => withFileChanges(tree, changes));
       } else if (cloudMode && activeProjectId) {
         for (const c of changes) {
           if (c.type === 'delete') await deleteFileFromCloud(activeProjectId, c.path);

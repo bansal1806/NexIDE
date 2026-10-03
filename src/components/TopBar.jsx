@@ -17,12 +17,12 @@ const LANGUAGES = [
 
 // Project mode: the status chip next to Start/Stop
 const PROJECT_STATUS = {
-  booting: 'Booting…', installing: 'Installing…', starting: 'Starting…',
+  downloading: 'Downloading…', booting: 'Booting…', installing: 'Installing…', starting: 'Starting…',
   ready: 'Running', stopped: 'Stopped', error: 'Failed', idle: 'Node.js project',
 };
 
 function ProjectControls({ status, onStart, onStop }) {
-  const live = ['booting', 'installing', 'starting', 'ready'].includes(status);
+  const live = ['downloading', 'booting', 'installing', 'starting', 'ready'].includes(status);
   return (
     <>
       <span className={`project-chip project-chip-${status}`} id="project-status" role="status">

@@ -37,7 +37,7 @@ const line = (color, text) => `${color}${text}${C.reset}\r\n`;
  * through `onFilesChanged([{ type: 'write' | 'delete', path, content? }])`. After installs, the
  * installed packages' type declarations are reported through `onTypes(files, tsconfigText)`.
  *
- * status: 'idle' | 'booting' | 'installing' | 'starting' | 'ready' | 'stopped' | 'error'
+ * status: 'idle' | 'downloading' | 'booting' | 'installing' | 'starting' | 'ready' | 'stopped' | 'error'
  */
 export function useProject({ onFilesChanged, onTypes } = {}) {
   const onFilesChangedRef = useRef(onFilesChanged);
@@ -203,18 +203,42 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
   }, [output]);
 
   /** Start (or restart) the project from `{ path, content }` records. */
-  const start = useCallback(async (files) => {
+  /**
+   * `source`: the files, or an async loader `(onProgress) => files`. With `{ download: true }`
+   * the loader fetches them first (a GitHub repo), shown as the 'downloading' step.
+   */
+  const start = useCallback(async (source, { download = false } = {}) => {
     const id = ++runId.current;
     const isCurrent = () => id === runId.current;
     killRun();
     output.clear();
-
-    const pkgText = files.find(f => f.path === 'package.json')?.content;
-    const pkg = parsePackageJson(pkgText);
     const fail = (message) => {
       output.append(line(C.red, message));
       setState({ status: 'error', url: null, port: null, error: message });
     };
+
+    let files = source;
+    if (typeof source === 'function') {
+      if (download) {
+        setState({ status: 'downloading', url: null, port: null, error: null });
+        output.append(line(C.dim, 'Downloading the repository files…'));
+      }
+      try {
+        let shown = 0;
+        files = await source((done, total) => {
+          // A progress line that rewrites itself, every 25 files
+          if (done === total || done - shown >= 25) { shown = done; output.append(`\r${C.dim}  ${done} / ${total} files${C.reset}`); }
+        });
+        if (download) output.append('\r\n');
+      } catch (e) {
+        if (isCurrent()) fail(`Could not load the project files: ${e?.message || e}`);
+        return;
+      }
+      if (!isCurrent()) return;
+    }
+
+    const pkgText = files.find(f => f.path === 'package.json')?.content;
+    const pkg = parsePackageJson(pkgText);
     if (!pkg) return fail('No valid package.json at the workspace root.');
     const script = pickDevScript(pkg);
     if (!script) return fail('package.json needs a "dev" or "start" script to run the project.');

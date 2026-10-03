@@ -17,7 +17,8 @@ const fakeFs = {
 };
 vi.mock('./useFileSystem', () => ({ useFileSystem: () => fakeFs }));
 vi.mock('./useMonacoWorkspace', () => ({ useMonacoWorkspace: () => {} }));
-vi.mock('../services/github', () => ({ fetchFileContent: vi.fn() }));
+const fetchRepoFiles = vi.fn(async (_info, paths) => paths.map(path => ({ path, content: `// ${path}` })));
+vi.mock('../services/github', () => ({ fetchFileContent: vi.fn(), fetchRepoFiles }));
 vi.mock('../services/db', () => ({
   fetchProjects: vi.fn(async () => []),
   createProject: vi.fn(),
@@ -164,13 +165,13 @@ describe('useWorkspace — workspace identity and run files', () => {
 });
 
 describe('useWorkspace — starter projects and runtime changes', () => {
-  it('opens a starter project with its entry file and a project tree', () => {
+  it('opens a starter project with its entry file and a project tree', async () => {
     const { result } = setup();
     act(() => { result.current.newProjectFromTemplate('react'); });
     expect(result.current.rootName).toBe('React + Vite');
     expect(result.current.activeTab.path).toBe('src/App.jsx');
     expect(result.current.fileTree.map(n => n.name)).toContain('package.json');
-    expect(result.current.projectFiles().map(f => f.path)).toEqual(expect.arrayContaining(['package.json', 'src/main.jsx', 'vite.config.js']));
+    expect((await result.current.projectFiles()).map(f => f.path)).toEqual(expect.arrayContaining(['package.json', 'src/main.jsx', 'vite.config.js']));
   });
 
   it('shows files the project creates and drops ones it deletes (in memory for starters)', async () => {
@@ -180,7 +181,7 @@ describe('useWorkspace — starter projects and runtime changes', () => {
       { type: 'write', path: 'src/components/Button.jsx', content: 'export const Button = 1;' },
       { type: 'delete', path: 'src/index.css' },
     ]));
-    const paths = result.current.projectFiles().map(f => f.path);
+    const paths = (await result.current.projectFiles()).map(f => f.path);
     expect(paths).toContain('src/components/Button.jsx');
     expect(paths).not.toContain('src/index.css');
     const src = result.current.fileTree.find(n => n.name === 'src');
@@ -212,5 +213,30 @@ describe('useWorkspace — starter projects and runtime changes', () => {
     expect(fakeFs.writePath).toHaveBeenCalledWith('package-lock.json', '{"lockfileVersion":3}');
     expect(fakeFs.removePath).toHaveBeenCalledWith('old.js');
     expect(fakeFs.refreshTree).toHaveBeenCalled();
+  });
+});
+
+describe('useWorkspace — running a GitHub repo as a project', () => {
+  const item = (path, size = 100) => ({ name: path.split('/').pop(), path, kind: 'file', handle: null, githubItem: { path, size }, children: [] });
+  const repo = (files) => ({ owner: 'me', repo: 'app', branch: 'main', tree: files, truncated: false });
+
+  it('downloads the text files it needs once, then caches them on the tree', async () => {
+    const { result } = setup();
+    act(() => result.current.handleGitHubLoad(repo([
+      item('package.json'), item('src/main.js'), item('public/logo.png'), item('.env'), item('data/huge.json', 2 * 1024 * 1024),
+    ])));
+    const files = await act(() => result.current.projectFiles());
+    expect(fetchRepoFiles).toHaveBeenCalledTimes(1);
+    expect(fetchRepoFiles.mock.calls[0][1].sort()).toEqual(['package.json', 'src/main.js']);
+    expect(files.map(f => f.path).sort()).toEqual(['package.json', 'src/main.js']);
+    await act(() => result.current.projectFiles());
+    expect(fetchRepoFiles.mock.calls[1][1]).toEqual([]); // nothing left to download
+  });
+
+  it('refuses repositories too large for a browser tab', async () => {
+    const { result } = setup();
+    act(() => result.current.handleGitHubLoad(repo(Array.from({ length: 1501 }, (_, i) => item(`src/f${i}.js`)))));
+    await expect(result.current.projectFiles()).rejects.toThrow(/too large to run in the browser \(1501 files/);
+    expect(fetchRepoFiles).not.toHaveBeenCalled();
   });
 });

@@ -62,6 +62,46 @@ function sortTree(nodes) {
 }
 
 /**
+ * A copy of `tree` with file changes applied: `[{ type: 'write' | 'delete', path, content? }]`.
+ * Untouched nodes keep everything they carry (GitHub metadata, handles, not-yet-loaded content);
+ * written files get `_content`, missing parent directories are created.
+ */
+export function withFileChanges(tree, changes) {
+  const clone = (nodes) => nodes.map(n => ({ ...n, children: n.children?.length ? clone(n.children) : [] }));
+  const root = clone(tree || []);
+  const childrenOf = (dirPath, create) => {
+    let children = root;
+    let path = '';
+    for (const name of dirPath ? dirPath.split('/') : []) {
+      path = path ? `${path}/${name}` : name;
+      let dir = children.find(n => n.name === name && n.kind === 'directory');
+      if (!dir) {
+        if (!create) return null;
+        dir = { name, path, kind: 'directory', handle: null, children: [] };
+        children.push(dir);
+      }
+      children = dir.children;
+    }
+    return children;
+  };
+  for (const change of changes) {
+    const parts = change.path.split('/');
+    const name = parts.pop();
+    const siblings = childrenOf(parts.join('/'), change.type !== 'delete');
+    if (!siblings) continue;
+    const index = siblings.findIndex(n => n.name === name);
+    if (change.type === 'delete') {
+      if (index !== -1) siblings.splice(index, 1);
+    } else if (index !== -1 && siblings[index].kind === 'file') {
+      siblings[index] = { ...siblings[index], _content: change.content };
+    } else if (index === -1) {
+      siblings.push({ name, path: change.path, kind: 'file', handle: null, _content: change.content, children: [] });
+    }
+  }
+  return sortTree(root);
+}
+
+/**
  * Build a nested tree from flat `{ path, content }` records (cloud project files).
  * File nodes carry `_content`; missing parent directories are created.
  */

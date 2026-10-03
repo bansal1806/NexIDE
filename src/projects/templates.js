@@ -466,6 +466,150 @@ export default function App({ title }: AppProps) {
   'src/index.css': TS_CSS,
 };
 
+const SVELTE = {
+  'package.json': json({
+    name: 'my-svelte-app',
+    private: true,
+    type: 'module',
+    scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+    devDependencies: { vite: '^6.3.0', svelte: '^5.0.0', '@sveltejs/vite-plugin-svelte': '^5.0.0' },
+  }),
+  'vite.config.js': `import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+export default defineConfig({
+  plugins: [svelte()],
+});
+`,
+  'index.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Svelte app</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+`,
+  'src/main.js': `import { mount } from 'svelte';
+import App from './App.svelte';
+import './app.css';
+
+mount(App, { target: document.getElementById('app') });
+`,
+  'src/App.svelte': `<script>
+  let count = $state(0);
+</script>
+
+<main>
+  <h1>Hello from Svelte</h1>
+  <p>Edit <code>src/App.svelte</code> — changes appear instantly (hot reload).</p>
+  <button onclick={() => count++}>Clicked {count} {count === 1 ? 'time' : 'times'}</button>
+</main>
+`,
+  'src/app.css': `body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #1b1726;
+  color: #f7f3ff;
+}
+
+main {
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 24px;
+}
+
+button {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: 2px solid #0d0b13;
+  border-radius: 999px;
+  background: #ffb98f;
+  color: #0d0b13;
+  cursor: pointer;
+}
+`,
+};
+
+const ASTRO = {
+  'package.json': json({
+    name: 'my-astro-site',
+    private: true,
+    type: 'module',
+    scripts: { dev: 'astro dev', build: 'astro build', preview: 'astro preview' },
+    dependencies: { astro: '^5.0.0' },
+  }),
+  'astro.config.mjs': `import { defineConfig } from 'astro/config';
+
+export default defineConfig({});
+`,
+  'src/layouts/Layout.astro': `---
+const { title } = Astro.props;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
+
+<style is:global>
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: #1b1726;
+    color: #f7f3ff;
+  }
+  main {
+    max-width: 640px;
+    margin: 64px auto;
+    padding: 0 24px;
+  }
+  a { color: #8fd8ff; }
+</style>
+`,
+  'src/pages/index.astro': `---
+import Layout from '../layouts/Layout.astro';
+
+// Runs on the server for every request in dev
+const planets = ['Mercury', 'Venus', 'Earth', 'Mars'];
+---
+
+<Layout title="My Astro site">
+  <main>
+    <h1>Hello from Astro</h1>
+    <p>Edit <code>src/pages/index.astro</code> — the page reloads as you type.</p>
+    <ul>
+      {planets.map((planet) => <li>{planet}</li>)}
+    </ul>
+    <p><a href="/about">About this site →</a></p>
+  </main>
+</Layout>
+`,
+  'src/pages/about.astro': `---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="About">
+  <main>
+    <h1>About</h1>
+    <p>Every <code>.astro</code> file in <code>src/pages</code> is a route.</p>
+    <p><a href="/">← Home</a></p>
+  </main>
+</Layout>
+`,
+};
+
 const EXPRESS = {
   'package.json': json({
     name: 'my-express-api',
@@ -509,6 +653,8 @@ export const PROJECT_TEMPLATES = [
   { id: 'react',   emoji: '⚛️', label: 'React + Vite', blurb: 'hot reload, JSX',        tone: 'sky',   files: REACT },
   { id: 'react-ts', emoji: 'TS', label: 'React + TS',  blurb: 'Vite, strict types',     tone: 'pink',  files: REACT_TS },
   { id: 'vue',     emoji: '💚', label: 'Vue + Vite',   blurb: 'single-file components', tone: 'mint',  files: VUE },
+  { id: 'svelte',  emoji: '🔥', label: 'Svelte + Vite', blurb: 'runes, hot reload',     tone: 'peach', files: SVELTE },
+  { id: 'astro',   emoji: '🚀', label: 'Astro',        blurb: 'content sites, routes',  tone: 'sky',   files: ASTRO },
   { id: 'express', emoji: '🚂', label: 'Express API',  blurb: 'a real Node.js server',  tone: 'peach', files: EXPRESS },
 ];
 

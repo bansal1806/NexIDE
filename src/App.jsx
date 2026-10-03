@@ -125,8 +125,7 @@ export default function App() {
   const project = useProject({ onFilesChanged: applyRuntimeChanges, onTypes: applyProjectTypes });
   const { reset: resetProject, writeFile: syncProjectFile, rescan: rescanProject } = project;
   const projectUnsupported = useMemo(() => projectRuntimeUnsupportedReason(), []);
-  // GitHub repos load file contents lazily, so they can't be mounted (yet)
-  const isProject = !githubMode && !!findNodeByPath(fileTree, 'package.json');
+  const isProject = !!findNodeByPath(fileTree, 'package.json');
   const projectActive = isProject && !projectUnsupported;
   useEffect(() => {
     resetProject();
@@ -139,8 +138,9 @@ export default function App() {
   const startProject = useCallback(() => {
     setBottomPanel('terminal');
     setRightPanel('preview');
-    project.start(projectFiles());
-  }, [project, projectFiles]);
+    // GitHub repos load file contents on demand, so running one downloads the rest first
+    project.start(projectFiles, { download: githubMode });
+  }, [project, projectFiles, githubMode]);
 
   const onEditorChange = useCallback((value) => {
     handleEditorChange(value);
@@ -149,7 +149,7 @@ export default function App() {
 
   const isPythonTab = activeTab?.lang === 'python';
   const consoleOutput = isPythonTab ? pyOutput : jsOutput;
-  const PROJECT_RUN_STATUS = { booting: 'running', installing: 'running', starting: 'running', ready: 'success', error: 'error' };
+  const PROJECT_RUN_STATUS = { downloading: 'running', booting: 'running', installing: 'running', starting: 'running', ready: 'success', error: 'error' };
   const runStatus = projectActive
     ? (PROJECT_RUN_STATUS[project.status] || 'idle')
     : ((isPythonTab ? pyStatus : jsStatus) || 'idle');
@@ -475,7 +475,7 @@ export default function App() {
             onSelect={setRightPanel}
             onClose={() => setRightPanel(null)}
             preview={{ code: activeTab?.content || '', language: activeTab?.lang || 'plaintext', onConsoleMessage: addConsoleMessage }}
-            projectPreview={projectActive ? { status: project.status, url: project.url, error: project.error, onStart: startProject } : null}
+            projectPreview={projectActive ? { status: project.status, url: project.url, error: project.error, onStart: startProject, download: githubMode } : null}
             ai={{
               gemini,
               editorCode: activeTab?.content || '',

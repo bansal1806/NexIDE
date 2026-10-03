@@ -252,8 +252,20 @@ Production E2E after merge: 55/55.
 - Verification: lint clean · unit 113/113 · E2E 67/67 (twice): no false errors in a TS project, a real type
   error is caught, completions come from the installed React types.
 
+Production E2E after merge: 58/58.
+
+### 12.4 GitHub repos as projects; Svelte and Astro ✅ (branch `project-github`)
+- [x] A GitHub repo with a root package.json runs as a project. Starting it downloads its text files first
+  (same rules as runtime sync; up to 1,500 files / 30 MB, else a clear error), shown as a "Download" step.
+  Public repos: raw.githubusercontent.com (no API rate limit); with a token: the contents API (private repos).
+  Downloads are cached on the tree; CSP connect-src adds raw.githubusercontent.com.
+- [x] Runtime changes update a GitHub tree in place (`withFileChanges` keeps unloaded files and metadata);
+  they stay in NexIDE, since GitHub is read-only here.
+- [x] Svelte 5 + Vite and Astro 5 starters (verified: render, hot reload, shell).
+- Verification: lint clean · unit 119/119 · E2E 68/68 (twice), incl. a mocked GitHub repo that downloads only
+  its eligible files, installs and renders.
+
 ### Next steps
-- 12.4 Run GitHub repos as projects (bulk file fetch); more templates (Svelte, Astro, Remix).
 - 12.5 Persist `node_modules` between visits for faster restarts.
 
 ## Ideas for a later phase
