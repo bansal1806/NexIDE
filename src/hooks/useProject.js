@@ -124,6 +124,32 @@ export function useProject({ onFilesChanged } = {}) {
     if (changes.length && mounted.current) onFilesChangedRef.current?.(changes);
   }, []);
 
+  // Safety net for missed watch events: compare the whole project with what we know.
+  // Runs after each shell command and on the explorer's Refresh.
+  const rescanTimer = useRef(null);
+  const rescan = useCallback(async () => {
+    const wc = container.current;
+    if (!wc || !mounted.current) return;
+    const found = new Set();
+    const walk = async (dir, depth) => {
+      const entries = await wc.fs.readdir(dir || '.', { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        const path = dir ? `${dir}/${entry.name}` : entry.name;
+        if (found.size >= 2000 || !shouldSyncPath(path, isBinaryName)) continue;
+        if (entry.isDirectory()) { if (depth < 8) await walk(path, depth + 1); } else found.add(path);
+      }
+    };
+    await walk('', 0);
+    found.forEach(path => watchQueue.current.add(path));
+    synced.current.forEach((_, path) => { if (!found.has(path)) watchQueue.current.add(path); });
+    clearTimeout(watchTimer.current);
+    await flushWatch();
+  }, [flushWatch]);
+  const scheduleRescan = useCallback(() => {
+    clearTimeout(rescanTimer.current);
+    rescanTimer.current = setTimeout(rescan, 400);
+  }, [rescan]);
+
   const startWatching = useCallback((wc) => {
     stopWatching();
     watcher.current = wc.fs.watch('.', { recursive: true }, (_event, filename) => {
@@ -267,24 +293,29 @@ export function useProject({ onFilesChanged } = {}) {
     const process = await wc.spawn('jsh', { terminal: { cols, rows } });
     const writer = process.input.getWriter();
     shell.current = { process, writer };
-    process.output.pipeTo(new WritableStream({ write: chunk => shellOutput.append(chunk) })).catch(() => {});
+    process.output.pipeTo(new WritableStream({
+      write(chunk) {
+        shellOutput.append(chunk);
+        if (chunk.includes('❯')) scheduleRescan(); // the prompt is back: a command finished
+      },
+    })).catch(() => {});
     process.exit.then(() => {
       if (shell.current?.process === process) shell.current = null;
       shellOutput.append(line(C.dim, '\r\nShell exited. Reopen the Shell tab to start a new one.'));
     });
     return true;
-  }, [getContainer, shellOutput]);
+  }, [getContainer, shellOutput, scheduleRescan]);
 
   const shellInput = useCallback((data) => { shell.current?.writer.write(data); }, []);
   const resizeShell = useCallback((size) => { shell.current?.process.resize(size); }, []);
 
-  useEffect(() => () => { killRun(); stopWatching(); }, [killRun, stopWatching]);
+  useEffect(() => () => { killRun(); stopWatching(); clearTimeout(rescanTimer.current); }, [killRun, stopWatching]);
 
   return {
     ...state,
     output, shellOutput,
     canShell: () => mounted.current,
-    start, stop, reset, writeFile,
+    start, stop, reset, writeFile, rescan,
     openShell, shellInput, resizeShell,
   };
 }

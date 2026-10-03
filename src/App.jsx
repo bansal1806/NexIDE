@@ -117,7 +117,7 @@ export default function App() {
 
   // ── Node.js projects (package.json at the root) run in the in-browser runtime ──
   const project = useProject({ onFilesChanged: applyRuntimeChanges });
-  const { reset: resetProject, writeFile: syncProjectFile } = project;
+  const { reset: resetProject, writeFile: syncProjectFile, rescan: rescanProject } = project;
   const projectUnsupported = useMemo(() => projectRuntimeUnsupportedReason(), []);
   // GitHub repos load file contents lazily, so they can't be mounted (yet)
   const isProject = !githubMode && !!findNodeByPath(fileTree, 'package.json');
@@ -358,7 +358,7 @@ export default function App() {
                 onOpenFolder={handleOpenFolder}
                 onFileClick={openFileInTab}
                 activeFilePath={activeTab?.path}
-                onRefresh={handleRefreshTree}
+                onRefresh={() => { if (projectActive) rescanProject(); handleRefreshTree(); }}
                 githubMode={githubMode}
                 githubInfo={githubInfo}
                 cloudMode={cloudMode}
