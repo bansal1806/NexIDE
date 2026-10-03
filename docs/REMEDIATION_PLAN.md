@@ -265,8 +265,20 @@ Production E2E after merge: 58/58.
 - Verification: lint clean · unit 119/119 · E2E 68/68 (twice), incl. a mocked GitHub repo that downloads only
   its eligible files, installs and renders.
 
-### Next steps
-- 12.5 Persist `node_modules` between visits for faster restarts.
+Production E2E after merge: 59/59.
+
+### 12.5 Dependencies kept between visits ✅ (branch `project-cache`)
+- [x] After a successful install, `node_modules` (binary snapshot) and the generated lockfile go to IndexedDB in
+  the background, keyed by a SHA-256 of the dependency fields and lockfile.
+- [x] Next start with the same dependencies: mount the snapshot, restore executable bits (snapshots drop them;
+  without it `vite` fails with EACCES), then `npm install` only verifies. A "Dependencies restored" badge shows it.
+- [x] Least recently used snapshots evicted beyond 3 projects / 600 MB; Settings → Projects shows usage and clears it.
+- Measured: React 48s → 14s, Next.js 82s → 20s (snapshot 38 MB / 123 MB).
+- Verification: lint clean · unit 125/125 · E2E 69/69 (three runs; one transient CDN failure in an unrelated
+  Python check on another run).
+
+**Phase 12 complete.** Ideas beyond it: Remix / SvelteKit / Nuxt starters, pushing changes back to GitHub
+(needs OAuth), and a pnpm option.
 
 ## Ideas for a later phase
 
