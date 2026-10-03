@@ -678,6 +678,41 @@ try {
     }
     check('Project: Next.js picks up edits', edited.ok, JSON.stringify(edited.text.slice(0, 60)));
     await run(); // Stop
+
+    // TypeScript project: the installed packages' types power editor diagnostics and completions
+    const tsDiagnostics = (path) => page.evaluate(async (path) => {
+      const ts = window.monaco.typescript ?? window.monaco.languages.typescript;
+      const uri = window.monaco.Uri.parse(`file:///${path}`);
+      const worker = await (await ts.getTypeScriptWorker())(uri);
+      const all = [...await worker.getSyntacticDiagnostics(uri.toString()), ...await worker.getSemanticDiagnostics(uri.toString())];
+      return all.map(d => `${d.code}: ${typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText}`);
+    }, path);
+    const reactTs = await startProject('react-ts');
+    const tsRendered = await waitPreview(/Hello from React \+ TypeScript/, 60000);
+    check('Project: React + TypeScript renders', reactTs.ready && tsRendered.ok, JSON.stringify(tsRendered.text.slice(0, 60)));
+    // Before the types arrive, "Cannot find module 'react'" (2307); wait until the editor is clean
+    let clean = [];
+    for (const end = Date.now() + 120000; Date.now() < end;) {
+      clean = [...await tsDiagnostics('src/App.tsx'), ...await tsDiagnostics('src/main.tsx')];
+      if (!clean.length) break;
+      await page.waitForTimeout(2000);
+    }
+    check('Project: installed types give error-free TypeScript in the editor', clean.length === 0, clean.slice(0, 2).join(' | '));
+    await setCode('import { useState } from "react";\nexport default function App() {\n  const [n] = useState<number>("nope");\n  return <h1>{n}</h1>;\n}\n');
+    await page.waitForTimeout(800);
+    const caught = (await tsDiagnostics('src/App.tsx')).some(d => d.startsWith('2345'));
+    const completions = await page.evaluate(async () => {
+      const ts = window.monaco.typescript ?? window.monaco.languages.typescript;
+      const model = window.monaco.editor.getModel(window.monaco.Uri.parse('file:///src/App.tsx'));
+      model.setValue('import * as React from "react";\nReact.use');
+      const worker = await (await ts.getTypeScriptWorker())(model.uri);
+      const info = await worker.getCompletionsAtPosition(model.uri.toString(), model.getValue().length);
+      return (info?.entries || []).map(e => e.name);
+    });
+    check('Project: type errors and completions come from the installed packages',
+      caught && completions.includes('useState') && completions.includes('useEffect'),
+      `caught=${caught} completions=${completions.filter(n => n.startsWith('use')).slice(0, 4).join(',')}`);
+    await run(); // Stop
   }
 
   // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
