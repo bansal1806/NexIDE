@@ -2,8 +2,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useFileSystem } from './useFileSystem';
 import { useMonacoWorkspace } from './useMonacoWorkspace';
 import { fetchFileContent } from '../services/github';
-import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from '../services/db';
-import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath } from '../utils/files';
+import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud, deleteFileFromCloud } from '../services/db';
+import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath, isBinaryName } from '../utils/files';
 import { STARTERS } from '../components/starters';
 import { PROJECT_TEMPLATES, templateFiles } from '../projects/templates';
 
@@ -15,7 +15,6 @@ const TEMPLATES = {
 };
 // File each project template opens first
 const PROJECT_ENTRY = { next: 'app/page.jsx', react: 'src/App.jsx', vue: 'src/App.vue', express: 'server.js' };
-const BINARY_EXT = /\.(png|jpe?g|gif|webp|ico|bmp|pdf|zip|gz|tar|7z|woff2?|ttf|otf|eot|mp[34]|wav|ogg|webm|mov|exe|dll|so|wasm|class|jar)$/i;
 
 let tabIdCounter = 1;
 
@@ -67,6 +66,8 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
   // ── File system / workspaces ─────────────────────────────────────
   const fs = useFileSystem();
   const [workspaceFiles, setWorkspaceFiles] = useState([]);
+  const workspaceFilesRef = useRef(workspaceFiles);
+  useEffect(() => { workspaceFilesRef.current = workspaceFiles; }, [workspaceFiles]);
   const [githubMode, setGithubMode] = useState(false);
   const [githubInfo, setGithubInfo] = useState(null);
   const [githubTree, setGithubTree] = useState([]); // also holds cloud / starter project trees
@@ -123,7 +124,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     if (node.kind === 'directory') return null;
 
     const name = node.name || node.path.split('/').pop();
-    if (BINARY_EXT.test(name)) {
+    if (isBinaryName(name)) {
       notify('info', `${name} looks like a binary file and can't be opened in the editor.`);
       return null;
     }
@@ -394,6 +395,65 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     return Object.entries(files).map(([path, content]) => ({ path, content }));
   }, [buildRunFiles, liveActiveTab]);
 
+  // ── Files changed by a running project (generators, npm, the shell) ──
+  // changes: [{ type: 'write' | 'delete', path, content? }]
+  const applyRuntimeChanges = useCallback(async (changes) => {
+    if (!changes?.length) return;
+
+    // Workspace file list: Monaco models for imports, and what the next Start mounts
+    const byPath = new Map(workspaceFilesRef.current.map(f => [f.path, f]));
+    for (const c of changes) {
+      if (c.type === 'delete') byPath.delete(c.path);
+      else byPath.set(c.path, { path: c.path, name: c.path.split('/').pop(), content: c.content });
+    }
+    const nextFiles = [...byPath.values()];
+    workspaceFilesRef.current = nextFiles;
+    setWorkspaceFiles(nextFiles);
+
+    // Open tabs follow the project, except ones with unsaved edits (never overwritten)
+    const latest = new Map(changes.map(c => [c.path, c]));
+    const open = tabsRef.current.filter(t => latest.has(t.path));
+    const deletedOpen = open.filter(t => latest.get(t.path).type === 'delete').map(t => t.name);
+    const conflicts = open.filter(t => {
+      const c = latest.get(t.path);
+      return c.type === 'write' && t.dirty && t.content !== c.content;
+    }).map(t => t.name);
+    if (open.length) {
+      setTabs(prev => prev.map(t => {
+        const change = latest.get(t.path);
+        if (!change) return t;
+        if (change.type === 'delete') return { ...t, dirty: true };
+        if (t.dirty || t.content === change.content) return t;
+        return { ...t, content: change.content };
+      }));
+    }
+
+    // Persist where the workspace lives
+    try {
+      if (starterProject) {
+        setGithubTree(buildTreeFromPaths(nextFiles));
+      } else if (cloudMode && activeProjectId) {
+        for (const c of changes) {
+          if (c.type === 'delete') await deleteFileFromCloud(activeProjectId, c.path);
+          else await saveFileToCloud(activeProjectId, c.path, c.path.split('/').pop(), c.content, getLang(c.path));
+        }
+        await refreshCloudTree(activeProjectId);
+      } else if (!githubMode && fs.rootName) {
+        let written = true;
+        for (const c of changes) {
+          written = (c.type === 'delete' ? await fs.removePath(c.path) : await fs.writePath(c.path, c.content)) && written;
+        }
+        if (written) await fs.refreshTree();
+        else notify('info', 'The project changed files, but this browser opened the folder read-only, so they stay in NexIDE only.');
+      }
+    } catch (e) {
+      notify('error', `Could not save files the project changed: ${e.message || e}`);
+    }
+
+    if (conflicts.length) notify('info', `The project changed ${conflicts.join(', ')} while you had unsaved edits. Your version is kept.`);
+    else if (deletedOpen.length) notify('info', `The project deleted ${deletedOpen.join(', ')}. Save to keep it.`);
+  }, [starterProject, cloudMode, activeProjectId, githubMode, fs, notify, refreshCloudTree]);
+
   const handleRefreshTree = useCallback(() => {
     if (cloudMode && activeProjectId) {
       refreshCloudTree(activeProjectId).catch(e => notify('error', e.message));
@@ -437,7 +497,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     cloudMode, githubMode, githubInfo, activeProjectId, visibleCloudProjects, starterProject,
     tabs, setTabs, setActiveTabId, tabsRef, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
-    buildRunFiles, projectFiles, newProjectFromTemplate,
+    buildRunFiles, projectFiles, newProjectFromTemplate, applyRuntimeChanges,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   };

@@ -12,6 +12,8 @@ const fakeFs = {
   openFolder: vi.fn(),
   readAllFiles: vi.fn(async () => []),
   refreshTree: vi.fn(),
+  writePath: vi.fn(async () => true),
+  removePath: vi.fn(async () => true),
 };
 vi.mock('./useFileSystem', () => ({ useFileSystem: () => fakeFs }));
 vi.mock('./useMonacoWorkspace', () => ({ useMonacoWorkspace: () => {} }));
@@ -21,6 +23,7 @@ vi.mock('../services/db', () => ({
   createProject: vi.fn(),
   fetchProjectFiles: vi.fn(async () => []),
   saveFileToCloud: vi.fn(),
+  deleteFileFromCloud: vi.fn(),
 }));
 
 const { useWorkspace } = await import('./useWorkspace');
@@ -157,5 +160,57 @@ describe('useWorkspace — workspace identity and run files', () => {
     rerender(opts);
     const files = result.current.buildRunFiles(null);
     expect(Object.keys(files)).toEqual(['a.txt']);
+  });
+});
+
+describe('useWorkspace — starter projects and runtime changes', () => {
+  it('opens a starter project with its entry file and a project tree', () => {
+    const { result } = setup();
+    act(() => { result.current.newProjectFromTemplate('react'); });
+    expect(result.current.rootName).toBe('React + Vite');
+    expect(result.current.activeTab.path).toBe('src/App.jsx');
+    expect(result.current.fileTree.map(n => n.name)).toContain('package.json');
+    expect(result.current.projectFiles().map(f => f.path)).toEqual(expect.arrayContaining(['package.json', 'src/main.jsx', 'vite.config.js']));
+  });
+
+  it('shows files the project creates and drops ones it deletes (in memory for starters)', async () => {
+    const { result } = setup();
+    act(() => { result.current.newProjectFromTemplate('react'); });
+    await act(() => result.current.applyRuntimeChanges([
+      { type: 'write', path: 'src/components/Button.jsx', content: 'export const Button = 1;' },
+      { type: 'delete', path: 'src/index.css' },
+    ]));
+    const paths = result.current.projectFiles().map(f => f.path);
+    expect(paths).toContain('src/components/Button.jsx');
+    expect(paths).not.toContain('src/index.css');
+    const src = result.current.fileTree.find(n => n.name === 'src');
+    expect(src.children.map(n => n.name)).toEqual(expect.arrayContaining(['components', 'App.jsx']));
+    expect(fakeFs.writePath).not.toHaveBeenCalled();
+  });
+
+  it('updates clean open tabs but never overwrites unsaved edits', async () => {
+    const { result, opts } = setup();
+    act(() => { result.current.newProjectFromTemplate('react'); });
+    await act(() => result.current.applyRuntimeChanges([{ type: 'write', path: 'src/App.jsx', content: 'formatted' }]));
+    expect(result.current.activeTab.content).toBe('formatted');
+    expect(result.current.activeTab.dirty).toBe(false);
+
+    act(() => result.current.handleEditorChange('my edit'));
+    await act(() => result.current.applyRuntimeChanges([{ type: 'write', path: 'src/App.jsx', content: 'from the project' }]));
+    expect(result.current.activeTab.content).toBe('my edit');
+    expect(opts.notify).toHaveBeenCalledWith('info', expect.stringMatching(/App.jsx.*unsaved edits/));
+  });
+
+  it('writes runtime changes into an opened local folder', async () => {
+    fakeFs.rootName = 'my-app';
+    fakeFs.fileTree = [fileNode('package.json', '{}')];
+    const { result } = setup();
+    await act(() => result.current.applyRuntimeChanges([
+      { type: 'write', path: 'package-lock.json', content: '{"lockfileVersion":3}' },
+      { type: 'delete', path: 'old.js' },
+    ]));
+    expect(fakeFs.writePath).toHaveBeenCalledWith('package-lock.json', '{"lockfileVersion":3}');
+    expect(fakeFs.removePath).toHaveBeenCalledWith('old.js');
+    expect(fakeFs.refreshTree).toHaveBeenCalled();
   });
 });
