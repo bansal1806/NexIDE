@@ -5,6 +5,8 @@
 // Email-safe on purpose: tables + inline styles, no web fonts, no images, no CSS animation or
 // box-shadow (Gmail/Outlook drop them). The chunky offset shadow is a thicker right/bottom border.
 import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const INK = '#0d0b13';
 const FONT = "'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif";
@@ -196,7 +198,13 @@ ${chips([['▶ Run JS & Python', C.lemon], ['▲ Next.js in a tab', C.lilac], ['
   },
 };
 
-const dir = new URL('.', import.meta.url);
-for (const [name, { html }] of Object.entries(TEMPLATES)) writeFileSync(new URL(`${name}.html`, dir), html);
-writeFileSync(new URL('subjects.json', dir), JSON.stringify(Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, v.subject])), null, 2) + '\n');
-console.log(`Wrote ${Object.keys(TEMPLATES).length} templates to ${dir.pathname}`);
+export { TEMPLATES };
+export const subjectsJson = () => JSON.stringify(Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, v.subject])), null, 2) + '\n';
+
+// Write the files only when run directly (tests import TEMPLATES instead)
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  const dir = new URL('.', import.meta.url);
+  for (const [name, { html }] of Object.entries(TEMPLATES)) writeFileSync(new URL(`${name}.html`, dir), html);
+  writeFileSync(new URL('subjects.json', dir), subjectsJson());
+  console.log(`Wrote ${Object.keys(TEMPLATES).length} templates to ${fileURLToPath(dir)}`);
+}

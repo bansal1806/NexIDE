@@ -30,9 +30,10 @@ describe('Supabase email templates', () => {
     });
   }
 
-  it('the committed HTML matches build.mjs (run: node supabase/templates/build.mjs)', async () => {
-    const before = Object.fromEntries(Object.keys(REQUIRED).map(n => [n, read(`${n}.html`)]));
-    await import('./build.mjs?rebuild=' + Date.now());
-    for (const n of Object.keys(REQUIRED)) expect(read(`${n}.html`)).toBe(before[n]);
+  it('the committed files match build.mjs (run: node supabase/templates/build.mjs)', async () => {
+    const { TEMPLATES, subjectsJson } = await import('./build.mjs');
+    const lf = (text) => text.replace(/\r\n/g, '\n'); // Git may check files out with CRLF
+    for (const n of Object.keys(REQUIRED)) expect(lf(read(`${n}.html`))).toBe(TEMPLATES[n].html);
+    expect(lf(read('subjects.json'))).toBe(subjectsJson());
   });
 });

@@ -7,6 +7,7 @@ node supabase/templates/build.mjs
 ```
 
 The templates are email-safe:
+
 - tables and inline styles only
 - no images, web fonts, scripts or `box-shadow`
 - the chunky "shadow" is a thicker right/bottom border
@@ -19,7 +20,7 @@ They're built to hold up in Gmail, Outlook and Apple Mail, and on phones. So far
 2. For each email below, pick it in the list, set the **Subject**, and replace the **Body** with the whole contents of its `.html` file. Click **Save**.
 
 | Supabase template | File | Subject |
-|---|---|---|
+| --- | --- | --- |
 | Confirm sign up | `confirm-signup.html` | 🎈 One click and you're in — welcome to NexIDE! |
 | Invite user | `invite.html` | 🎟️ You've got an invite to NexIDE |
 | Magic link | `magic-link.html` | ✨ Your magic NexIDE sign-in link |
@@ -34,6 +35,7 @@ Subjects are also in `subjects.json`.
 Supabase's built-in email service is meant for testing. It is heavily rate-limited, and it only delivers to the email addresses of your Supabase project's team members. Anyone else who signs up gets no email.
 
 For real users, connect your own email provider:
+
 1. Open **Authentication → Emails → SMTP Settings**.
 2. Enter the SMTP details from your provider (for example Resend, Postmark or SendGrid).
 3. Set the sender name to **NexIDE**.
@@ -45,7 +47,7 @@ The templates work the same with any provider.
 Supabase fills in these placeholders when it sends an email:
 
 | Placeholder | Value |
-|---|---|
+| --- | --- |
 | `{{ .ConfirmationURL }}` | the action link |
 | `{{ .Token }}` | the one-time code |
 | `{{ .Email }}` | the user's address |
