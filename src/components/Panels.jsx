@@ -11,6 +11,10 @@ import { PackagesPanel } from './PackagesPanel';
 // Heavy panels (d3, sucrase) load on demand
 const CodeMap     = lazy(() => import('./CodeMap'));
 const LivePreview = lazy(() => import('./LivePreview'));
+// Project mode (WebContainers + xterm) loads only when a Node.js project is open
+const ProjectTerminal = lazy(() => import('./ProjectTerminal'));
+const ProjectPreview  = lazy(() => import('./ProjectPreview'));
+const panelLoading = <div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading…</div>;
 
 const LABELS = { ai: 'AI' };
 const label = (id) => LABELS[id] || id.charAt(0).toUpperCase() + id.slice(1);
@@ -30,29 +34,41 @@ function PanelTabs({ tabs, active, onSelect, onClose }) {
   );
 }
 
-/** Bottom panel: terminal and console (with program input). */
-export function BottomPanel({ panel, onSelect, onClose, terminal, console: consoleProps }) {
+/** Bottom panel: terminal and console (with program input). In project mode, a real shell. */
+export function BottomPanel({ panel, onSelect, onClose, terminal, console: consoleProps, project }) {
   return (
     <div className="bottom-panel">
-      <PanelTabs tabs={['terminal', 'console']} active={panel} onSelect={onSelect} onClose={onClose} />
+      <PanelTabs tabs={project ? ['terminal'] : ['terminal', 'console']} active={project ? 'terminal' : panel} onSelect={onSelect} onClose={onClose} />
       <div className="panel-content">
-        {panel === 'terminal' && <Terminal open={true} onClose={onClose} {...terminal} />}
-        {panel === 'console' && <ConsoleOutput {...consoleProps} />}
+        {project ? (
+          <ChunkErrorBoundary name="Terminal">
+            <Suspense fallback={panelLoading}><ProjectTerminal project={project} /></Suspense>
+          </ChunkErrorBoundary>
+        ) : (
+          <>
+            {panel === 'terminal' && <Terminal open={true} onClose={onClose} {...terminal} />}
+            {panel === 'console' && <ConsoleOutput {...consoleProps} />}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 /** Right panel: live preview, AI chat, code map, debugger state. Each section's props are passed through. */
-export function RightPanel({ panel, onSelect, onClose, preview, ai, map, debug, packages }) {
+export function RightPanel({ panel, onSelect, onClose, preview, projectPreview, ai, map, debug, packages }) {
   return (
     <div className="right-panel" role="complementary" aria-label="Side panel">
       <PanelTabs tabs={['preview', 'ai', 'map', 'debug', 'packages']} active={panel} onSelect={onSelect} onClose={onClose} />
       <div className="panel-content">
         <ChunkErrorBoundary name="Panel" key={panel}>
-          <Suspense fallback={<div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading…</div>}>
+          <Suspense fallback={panelLoading}>
             <AnimatePresence mode="wait">
-              {panel === 'preview' && <motion.div key="preview" {...fade}><LivePreview {...preview} /></motion.div>}
+              {panel === 'preview' && (
+                <motion.div key="preview" {...fade}>
+                  {projectPreview ? <ProjectPreview {...projectPreview} /> : <LivePreview {...preview} />}
+                </motion.div>
+              )}
               {panel === 'ai' && <motion.div key="ai" {...fade}><AIChat {...ai} /></motion.div>}
               {panel === 'map' && <motion.div key="map" {...fade}><CodeMap {...map} /></motion.div>}
               {panel === 'debug' && <motion.div key="debug" {...fade}><VariableInspector {...debug} /></motion.div>}

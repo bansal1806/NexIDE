@@ -22,6 +22,8 @@ import { usePackageLocks }    from './hooks/usePackageLocks';
 import { useDeployRecovery }  from './hooks/useDeployRecovery';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { useCelebrate }       from './hooks/useCelebrate';
+import { useProject, projectRuntimeUnsupportedReason } from './hooks/useProject';
+import { findNodeByPath }     from './utils/files';
 import { stdinLines }         from './runtime/output';
 
 // Components
@@ -79,7 +81,7 @@ export default function App() {
     cloudMode, githubMode, githubInfo, visibleCloudProjects,
     tabs, setTabs, setActiveTabId, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
-    buildRunFiles,
+    buildRunFiles, projectFiles, newProjectFromTemplate,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   } = useWorkspace({
@@ -113,9 +115,32 @@ export default function App() {
     inputRequest: pyInputRequest, submitInput: submitPyInput, endInput: endPyInput,
   } = usePython();
 
+  // ── Node.js projects (package.json at the root) run in the in-browser runtime ──
+  const project = useProject();
+  const { reset: resetProject, writeFile: syncProjectFile } = project;
+  const projectUnsupported = useMemo(() => projectRuntimeUnsupportedReason(), []);
+  // GitHub repos load file contents lazily, so they can't be mounted (yet)
+  const isProject = !githubMode && !!findNodeByPath(fileTree, 'package.json');
+  const projectActive = isProject && !projectUnsupported;
+  useEffect(() => { resetProject(); }, [workspaceKey, resetProject]);
+
+  const startProject = useCallback(() => {
+    setBottomPanel('terminal');
+    setRightPanel('preview');
+    project.start(projectFiles());
+  }, [project, projectFiles]);
+
+  const onEditorChange = useCallback((value) => {
+    handleEditorChange(value);
+    syncProjectFile(activeTabRef.current?.path, value);
+  }, [handleEditorChange, syncProjectFile, activeTabRef]);
+
   const isPythonTab = activeTab?.lang === 'python';
   const consoleOutput = isPythonTab ? pyOutput : jsOutput;
-  const runStatus = (isPythonTab ? pyStatus : jsStatus) || 'idle';
+  const PROJECT_RUN_STATUS = { booting: 'running', installing: 'running', starting: 'running', ready: 'success', error: 'error' };
+  const runStatus = projectActive
+    ? (PROJECT_RUN_STATUS[project.status] || 'idle')
+    : ((isPythonTab ? pyStatus : jsStatus) || 'idle');
   const isRunning = jsStatus === 'running' || pyStatus === 'running';
   useCelebrate(runStatus);
 
@@ -184,7 +209,8 @@ export default function App() {
     return run;
   }, [runPython, runJs, stdinFor, buildRunFiles, workspaceKey, lockFor, savePins]);
 
-  const runCode = useCallback(() => runTab(liveActiveTab()), [runTab, liveActiveTab]);
+  const runCode = useCallback(() => (projectActive ? startProject() : runTab(liveActiveTab())),
+    [projectActive, startProject, runTab, liveActiveTab]);
 
   const stopRun = useCallback(() => {
     stopPython();
@@ -268,6 +294,7 @@ export default function App() {
     <div className="app" id="nexide-app" data-theme={settings.theme || 'nexide-dark'}>
 
       <TopBar
+        project={projectActive ? { status: project.status, onStart: startProject, onStop: project.stop } : null}
         language={activeTab?.lang || 'plaintext'}
         onLanguageChange={(lang) => {
           const id = activeTabRef.current?.id;
@@ -351,6 +378,8 @@ export default function App() {
               onOpenFolder={handleOpenFolder}
               onOpenGitHub={() => setGithubOpen(true)}
               onNewFile={(tpl) => newFileFromTemplate(tpl.id)}
+              onNewProject={(tpl) => newProjectFromTemplate(tpl.id)}
+              projectsUnsupported={projectUnsupported}
               isSupported={fs.isSupported}
             />
           ) : (
@@ -365,7 +394,7 @@ export default function App() {
                     code={activeTab.content}
                     path={activeTab.path}
                     language={activeTab.lang}
-                    onChange={handleEditorChange}
+                    onChange={onEditorChange}
                     onCursorChange={setCursorPos}
                     onRun={runCode}
                     onSave={saveFile}
@@ -414,6 +443,7 @@ export default function App() {
               onSelect={setBottomPanel}
               onClose={() => setBottomPanel(null)}
               terminal={{ fileTree, activeFilePath: activeTab?.path, onRunFile: handleTerminalRun }}
+              project={projectActive ? project : null}
               console={{
                 lines: consoleOutput,
                 onClear: clearConsole,
@@ -433,6 +463,7 @@ export default function App() {
             onSelect={setRightPanel}
             onClose={() => setRightPanel(null)}
             preview={{ code: activeTab?.content || '', language: activeTab?.lang || 'plaintext', onConsoleMessage: addConsoleMessage }}
+            projectPreview={projectActive ? { status: project.status, url: project.url, error: project.error, onStart: startProject } : null}
             ai={{
               gemini,
               editorCode: activeTab?.content || '',

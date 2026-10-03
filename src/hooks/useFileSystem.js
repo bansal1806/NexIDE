@@ -153,7 +153,9 @@ export function useFileSystem() {
   const readAllFiles = useCallback(async (tree) => {
     const results = [];
     const exts = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.json', '.html', '.css', '.md', '.py',
-                  '.txt', '.csv', '.tsv', '.yaml', '.yml', '.toml', '.xml'];
+                  '.txt', '.csv', '.tsv', '.yaml', '.yml', '.toml', '.xml',
+                  // web project sources (mounted when the folder runs as a project)
+                  '.vue', '.svelte', '.astro', '.scss', '.sass', '.less', '.svg', '.mdx'];
     const MAX_FILES = 300;
     const MAX_FILE_BYTES = 512 * 1024;
 

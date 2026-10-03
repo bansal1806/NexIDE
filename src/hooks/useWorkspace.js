@@ -5,6 +5,7 @@ import { fetchFileContent } from '../services/github';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud } from '../services/db';
 import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath } from '../utils/files';
 import { STARTERS } from '../components/starters';
+import { PROJECT_TEMPLATES, templateFiles } from '../projects/templates';
 
 const TEMPLATES = {
   js:   { file: 'main.js',    lang: 'javascript' },
@@ -12,13 +13,15 @@ const TEMPLATES = {
   html: { file: 'index.html', lang: 'html' },
   ts:   { file: 'main.ts',    lang: 'typescript' },
 };
+// File each project template opens first
+const PROJECT_ENTRY = { next: 'app/page.jsx', react: 'src/App.jsx', vue: 'src/App.vue', express: 'server.js' };
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|ico|bmp|pdf|zip|gz|tar|7z|woff2?|ttf|otf|eot|mp[34]|wav|ogg|webm|mov|exe|dll|so|wasm|class|jar)$/i;
 
 let tabIdCounter = 1;
 
 /**
  * Open files (tabs) and the workspace they belong to: a local folder, a GitHub repo, a cloud
- * project, or scratch templates. Handles opening, editing, saving (incl. Auto Save), closing,
+ * project, a starter project (Next.js, Vite…), or scratch templates. Handles opening, editing, saving (incl. Auto Save), closing,
  * switching workspaces, and which files a run can import.
  *
  * @param {object} opts
@@ -66,9 +69,11 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
   const [workspaceFiles, setWorkspaceFiles] = useState([]);
   const [githubMode, setGithubMode] = useState(false);
   const [githubInfo, setGithubInfo] = useState(null);
-  const [githubTree, setGithubTree] = useState([]); // also holds the cloud project tree
+  const [githubTree, setGithubTree] = useState([]); // also holds cloud / starter project trees
+  // Starter project (in-memory files, run in the browser's Node.js runtime): { id, label } | null
+  const [starterProject, setStarterProject] = useState(null);
 
-  const fileTree = (cloudMode || githubMode) ? githubTree : fs.fileTree;
+  const fileTree = (cloudMode || githubMode || starterProject) ? githubTree : fs.fileTree;
 
   // ── Tabs ─────────────────────────────────────────────────────────
   const [tabs, setTabs] = useState([]);
@@ -183,6 +188,18 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
         await saveFileToCloud(activeProjectId, tab.path, tab.name, tab.content, tab.lang);
         if (isNew) await refreshCloudTree(activeProjectId);
         else findNodeByPath(githubTree, tab.path)._content = tab.content;
+      } else if (starterProject) {
+        // In memory: keep the tree and the files the project mounts in step with the editor
+        setWorkspaceFiles(prev => {
+          const exists = prev.some(f => f.path === tab.path);
+          const next = exists
+            ? prev.map(f => (f.path === tab.path ? { ...f, content: tab.content } : f))
+            : [...prev, { path: tab.path, name: tab.name, content: tab.content }];
+          if (!exists) setGithubTree(buildTreeFromPaths(next));
+          return next;
+        });
+        const node = findNodeByPath(githubTree, tab.path);
+        if (node) node._content = tab.content;
       } else if (githubMode) {
         if (!silent) notify('info', 'GitHub files are read-only here. Copy your changes or open the repo as a local folder.');
         return false;
@@ -216,18 +233,18 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
       notify('error', `Save failed: ${e.message || e}`);
       return false;
     }
-  }, [cloudMode, activeProjectId, githubMode, githubTree, fs, notify, refreshCloudTree, editorRef]);
+  }, [cloudMode, activeProjectId, starterProject, githubMode, githubTree, fs, notify, refreshCloudTree, editorRef]);
 
   const saveFile = useCallback(() => saveTab(liveActiveTab()), [saveTab, liveActiveTab]);
 
   // Auto Save: 1s after the last edit, for files that have a real backing store
   useEffect(() => {
     if (!autoSave || !activeTab?.dirty) return;
-    const backed = (cloudMode && activeProjectId) || (activeTab.handle && !activeTab.handle.fallback);
+    const backed = (cloudMode && activeProjectId) || starterProject || (activeTab.handle && !activeTab.handle.fallback);
     if (!backed) return;
     const t = setTimeout(() => saveTab(activeTab, { silent: true }), 1000);
     return () => clearTimeout(t);
-  }, [autoSave, activeTab, cloudMode, activeProjectId, saveTab]);
+  }, [autoSave, activeTab, cloudMode, activeProjectId, starterProject, saveTab]);
 
   const closeTab = useCallback((tabId, e) => {
     e?.stopPropagation();
@@ -265,6 +282,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
   // npm packages are pinned per workspace on first use (reproducible runs; pinned esm.sh URLs
   // are immutable, so the service worker can serve them offline)
   const workspaceKey = cloudMode ? `cloud:${activeProjectId}`
+    : starterProject ? `starter:${starterProject.id}:${starterProject.n}`
     : githubMode ? `github:${githubInfo?.owner}/${githubInfo?.repo}`
     : fs.rootName ? `local:${fs.rootName}` : 'scratch';
 
@@ -274,6 +292,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     const result = await fs.openFolder();
     if (!result) return;
     setGithubMode(false);
+    setStarterProject(null);
     setCloudMode(false);
     setActiveProjectId(null);
     setGithubInfo(null);
@@ -286,6 +305,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     if (!confirmDiscard('Open a new repository')) return;
     setGithubMode(true);
     setCloudMode(false);
+    setStarterProject(null);
     setActiveProjectId(null);
     setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch });
     setGithubTree(info.tree);
@@ -300,6 +320,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     if (!sameProject && !confirmDiscard('Open this project')) return;
     setGithubMode(false);
     setCloudMode(true);
+    setStarterProject(null);
     setActiveProjectId(project.id);
     setGithubInfo(null);
     setGithubTree([]);
@@ -343,6 +364,36 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     }
   }, [activeProjectId, githubTree, openFileInTab, refreshCloudTree, notify]);
 
+  // ── Starter projects ─────────────────────────────────────────────
+  const starterCount = useRef(0);
+  const newProjectFromTemplate = useCallback((templateId) => {
+    const files = templateFiles(templateId);
+    if (!files || !confirmDiscard('Start a new project')) return false;
+    const template = PROJECT_TEMPLATES.find(t => t.id === templateId);
+    setGithubMode(false);
+    setCloudMode(false);
+    setActiveProjectId(null);
+    setGithubInfo(null);
+    resetWorkspace();
+    setStarterProject({ id: templateId, label: template.label, n: ++starterCount.current });
+    setGithubTree(buildTreeFromPaths(files));
+    setWorkspaceFiles(files);
+    callbacks.current.onRevealSidebar();
+    // Open the entry file directly (tabsRef still lists the previous workspace's tabs)
+    const entry = files.find(f => f.path === PROJECT_ENTRY[templateId]) || files[0];
+    const tab = { id: tabIdCounter++, name: entry.name, path: entry.path, lang: getLang(entry.name), content: entry.content, handle: null, dirty: false };
+    setTabs([tab]);
+    setActiveTabId(tab.id);
+    return true;
+  }, [confirmDiscard, resetWorkspace]);
+
+  /** Every known file of the workspace as `{ path, content }` (open tabs' live edits win). */
+  const projectFiles = useCallback(() => {
+    const live = liveActiveTab();
+    const files = buildRunFiles(live);
+    return Object.entries(files).map(([path, content]) => ({ path, content }));
+  }, [buildRunFiles, liveActiveTab]);
+
   const handleRefreshTree = useCallback(() => {
     if (cloudMode && activeProjectId) {
       refreshCloudTree(activeProjectId).catch(e => notify('error', e.message));
@@ -378,14 +429,15 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
   const activeProjectName = visibleCloudProjects.find(p => p.id === activeProjectId)?.name;
   const rootName = cloudMode
     ? activeProjectName
+    : starterProject ? starterProject.label
     : (githubMode ? (githubInfo ? `${githubInfo.owner}/${githubInfo.repo}` : 'GitHub') : fs.rootName);
 
   return {
     fs, fileTree, rootName, workspaceKey, workspaceFiles,
-    cloudMode, githubMode, githubInfo, activeProjectId, visibleCloudProjects,
+    cloudMode, githubMode, githubInfo, activeProjectId, visibleCloudProjects, starterProject,
     tabs, setTabs, setActiveTabId, tabsRef, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
-    buildRunFiles,
+    buildRunFiles, projectFiles, newProjectFromTemplate,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   };
