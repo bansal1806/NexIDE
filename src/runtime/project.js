@@ -18,6 +18,32 @@ export function toFileSystemTree(files) {
   return root;
 }
 
+// Generated / dependency folders whose changes never sync back to the workspace
+const IGNORED_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '__pycache__']);
+export const MAX_SYNC_BYTES = 512 * 1024;
+
+/**
+ * Should a file the runtime changed show up in the workspace? Same rules as opening a local
+ * folder: no hidden entries (.git, .next, .cache…), no dependency/build output, text files only.
+ */
+export function shouldSyncPath(path, isBinaryName = () => false) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  if (!parts.length) return false;
+  if (parts.some(p => p.startsWith('.') || IGNORED_DIRS.has(p))) return false;
+  return !isBinaryName(parts[parts.length - 1]);
+}
+
+/** Normalise a watcher filename ("./src/a.js", "/src/a.js", "src\a.js", bytes) to "src/a.js". */
+export function normalizeWatchPath(filename) {
+  const text = typeof filename === 'string' ? filename : new TextDecoder().decode(filename);
+  return text.replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
+/** Known files removed when `path` (a file or a whole directory) disappears. */
+export function removedPaths(path, knownPaths) {
+  return [...knownPaths].filter(p => p === path || p.startsWith(path + '/'));
+}
+
 /** Parse package.json text; null when missing or invalid. */
 export function parsePackageJson(text) {
   if (typeof text !== 'string') return null;

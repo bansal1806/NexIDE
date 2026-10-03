@@ -10,6 +10,13 @@ const EXT_LANG = {
   less: 'less', sass: 'scss', env: 'plaintext',
 };
 
+const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|pdf|zip|gz|tgz|tar|7z|woff2?|ttf|otf|eot|mp[34]|wav|ogg|webm|mov|exe|dll|so|node|wasm|class|jar)$/i;
+
+/** Files the editor can't show as text (images, archives, fonts, binaries). */
+export function isBinaryName(name) {
+  return BINARY_EXT.test(name || '');
+}
+
 export function getLang(filename) {
   if (!filename || !filename.includes('.')) return 'plaintext';
   const ext = filename.split('.').pop().toLowerCase();

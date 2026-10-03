@@ -1,5 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { toFileSystemTree, parsePackageJson, pickDevScript, compatibilityWarnings, OutputLog } from '../runtime/project';
+import {
+  toFileSystemTree, parsePackageJson, pickDevScript, compatibilityWarnings, OutputLog,
+  shouldSyncPath, normalizeWatchPath, removedPaths, MAX_SYNC_BYTES,
+} from '../runtime/project';
+import { isBinaryName } from '../utils/files';
 
 // One WebContainer per page (the API allows a single instance). Loaded on demand: the API
 // boots Node.js inside a hidden StackBlitz iframe and serves dev servers on *.webcontainer-api.io.
@@ -27,10 +31,14 @@ const line = (color, text) => `${color}${text}${C.reset}\r\n`;
 /**
  * Runs a Node.js project (Next.js, Vite, Express…) in the in-browser runtime:
  * mount files → npm install → npm run dev → preview URL. Also owns an interactive shell.
+ * Files the project itself creates, changes or deletes (generators, npm, the shell) are reported
+ * through `onFilesChanged([{ type: 'write' | 'delete', path, content? }])`.
  *
  * status: 'idle' | 'booting' | 'installing' | 'starting' | 'ready' | 'stopped' | 'error'
  */
-export function useProject() {
+export function useProject({ onFilesChanged } = {}) {
+  const onFilesChangedRef = useRef(onFilesChanged);
+  useEffect(() => { onFilesChangedRef.current = onFilesChanged; });
   const [state, setState] = useState({ status: 'idle', url: null, port: null, error: null });
   const [output] = useState(() => new OutputLog());
   const [shellOutput] = useState(() => new OutputLog());
@@ -42,6 +50,10 @@ export function useProject() {
   const installedFor = useRef(null);    // package.json the current node_modules came from
   const pendingWrites = useRef(new Map());
   const shell = useRef(null);           // { process, writer }
+  const synced = useRef(new Map());     // path → content the workspace and the runtime agree on
+  const watcher = useRef(null);
+  const watchQueue = useRef(new Set());
+  const watchTimer = useRef(null);
 
   const killRun = useCallback(() => {
     processes.current.forEach(p => { try { p.kill(); } catch { /* already exited */ } });
@@ -62,6 +74,65 @@ export function useProject() {
     }
     return wc;
   }, [output]);
+
+  // ── Runtime → workspace file sync ────────────────────────────────
+  const stopWatching = useCallback(() => {
+    watcher.current?.close();
+    watcher.current = null;
+    clearTimeout(watchTimer.current);
+    watchTimer.current = null;
+    watchQueue.current.clear();
+  }, []);
+
+  const flushWatch = useCallback(async () => {
+    watchTimer.current = null;
+    const wc = container.current;
+    const queued = [...watchQueue.current];
+    watchQueue.current.clear();
+    if (!wc || !mounted.current || !queued.length) return;
+
+    const changes = [];
+    const gone = (path) => {
+      for (const removed of removedPaths(path, synced.current.keys())) {
+        synced.current.delete(removed);
+        changes.push({ type: 'delete', path: removed });
+      }
+    };
+    const visit = async (path, depth = 0) => {
+      // A directory? (readFile on one doesn't reliably fail.) Report the files inside it.
+      const entries = await wc.fs.readdir(path, { withFileTypes: true }).catch(() => null);
+      if (entries) {
+        if (depth >= 8) return;
+        for (const entry of entries) {
+          const child = `${path}/${entry.name}`;
+          if (shouldSyncPath(child, isBinaryName)) await visit(child, depth + 1);
+        }
+        return;
+      }
+      let content;
+      try {
+        content = await wc.fs.readFile(path, 'utf-8');
+      } catch (e) {
+        if (/ENOENT|no such file/i.test(String(e?.message || e))) gone(path);
+        return;
+      }
+      if (content.length > MAX_SYNC_BYTES || synced.current.get(path) === content) return;
+      synced.current.set(path, content);
+      changes.push({ type: 'write', path, content });
+    };
+    for (const path of queued) await visit(path);
+    if (changes.length && mounted.current) onFilesChangedRef.current?.(changes);
+  }, []);
+
+  const startWatching = useCallback((wc) => {
+    stopWatching();
+    watcher.current = wc.fs.watch('.', { recursive: true }, (_event, filename) => {
+      const path = normalizeWatchPath(filename);
+      if (!shouldSyncPath(path, isBinaryName)) return;
+      watchQueue.current.add(path);
+      if (!watchTimer.current) watchTimer.current = setTimeout(flushWatch, 300);
+    });
+  }, [stopWatching, flushWatch]);
 
   const pipe = useCallback((process, isCurrent) => {
     process.output.pipeTo(new WritableStream({
@@ -92,13 +163,18 @@ export function useProject() {
       const wc = await getContainer();
       if (!isCurrent()) return;
 
-      // Fresh files; keep node_modules (and the lockfile) when dependencies haven't changed
+      // Fresh files; keep node_modules (and the lockfile) when dependencies haven't changed.
+      // Not watching while the old files are cleared out (those aren't user deletions).
+      stopWatching();
+      mounted.current = false;
       const keep = installedFor.current === pkgText ? new Set(['node_modules', 'package-lock.json']) : new Set();
       const entries = await wc.fs.readdir('/');
       await Promise.all(entries.filter(name => !keep.has(name)).map(name => wc.fs.rm(name, { recursive: true, force: true })));
       await wc.mount(toFileSystemTree(files));
+      synced.current = new Map(files.map(f => [f.path, f.content]));
       mounted.current = true;
       if (!isCurrent()) return;
+      startWatching(wc);
 
       compatibilityWarnings(pkg).forEach(w => output.append(line(C.yellow, `⚠ ${w}`)));
 
@@ -134,7 +210,7 @@ export function useProject() {
     } catch (e) {
       if (isCurrent()) fail(e?.message || String(e));
     }
-  }, [getContainer, killRun, output, pipe]);
+  }, [getContainer, killRun, output, pipe, stopWatching, startWatching]);
 
   const stop = useCallback(() => {
     runId.current++;
@@ -147,7 +223,9 @@ export function useProject() {
   const reset = useCallback(() => {
     runId.current++;
     killRun();
+    stopWatching();
     mounted.current = false;
+    synced.current = new Map();
     pendingWrites.current.forEach(clearTimeout);
     pendingWrites.current.clear();
     if (shell.current) {
@@ -157,11 +235,12 @@ export function useProject() {
     output.clear();
     shellOutput.clear();
     setState({ status: 'idle', url: null, port: null, error: null });
-  }, [killRun, output, shellOutput]);
+  }, [killRun, stopWatching, output, shellOutput]);
 
   /** Mirror an editor change into the container (debounced) so dev servers hot-reload. */
   const writeFile = useCallback((path, content) => {
     if (!mounted.current || !container.current || !path) return;
+    synced.current.set(path, content); // so the watcher doesn't echo it back
     clearTimeout(pendingWrites.current.get(path));
     pendingWrites.current.set(path, setTimeout(async () => {
       pendingWrites.current.delete(path);
@@ -199,7 +278,7 @@ export function useProject() {
   const shellInput = useCallback((data) => { shell.current?.writer.write(data); }, []);
   const resizeShell = useCallback((size) => { shell.current?.process.resize(size); }, []);
 
-  useEffect(() => () => killRun(), [killRun]);
+  useEffect(() => () => { killRun(); stopWatching(); }, [killRun, stopWatching]);
 
   return {
     ...state,
