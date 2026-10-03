@@ -784,6 +784,20 @@ try {
     await run(); // Stop
   }
 
+  // ── Auth: an expired / reused email confirmation link explains itself and offers sign-in ──
+  {
+    // Arrive from elsewhere, as the email link does (a hash-only change wouldn't reload the app)
+    await page.goto('about:blank');
+    await page.goto(`${BASE}#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&sb=`);
+    const dialog = await page.waitForSelector('[role="dialog"][aria-label="Authentication"]', { timeout: 10000 }).then(() => true, () => false);
+    const notice = await page.textContent('.statusbar [role="alert"]').catch(() => '');
+    const cleaned = !new URL(page.url()).hash;
+    check('Auth: an expired email link shows why and offers sign-in', dialog && /expired or was already used/.test(notice) && cleaned,
+      `dialog=${dialog} cleaned=${cleaned} notice=${JSON.stringify(notice)}`);
+    await page.keyboard.press('Escape');
+    await page.goto(BASE);
+  }
+
   // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
   {
     await page.focus('#btn-topbar-settings');
