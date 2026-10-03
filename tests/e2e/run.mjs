@@ -41,7 +41,8 @@ page.on('console', m => {
   if (m.type() !== 'error') return;
   // A running project's own app (preview iframe / runtime frame) isn't NexIDE
   if (/webcontainer-api\.io|stackblitz\.com/.test(m.location()?.url || '')) return;
-  pageErrors.push(`console: ${m.text()}`);
+  const where = m.location()?.url;
+  pageErrors.push(`console: ${m.text()}${where ? ` (${where})` : ''}`);
 });
 // CSP violations anywhere in the page (workers report through console errors)
 await page.addInitScript(() => {
