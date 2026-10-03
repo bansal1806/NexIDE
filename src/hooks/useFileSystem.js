@@ -149,6 +149,35 @@ export function useFileSystem() {
     await parentHandle.removeEntry(name, { recursive: true });
   }, []);
 
+  // Path-based access (files a running project creates or deletes). Native folders only:
+  // the <input webkitdirectory> fallback is a read-only snapshot. Returns false when unsupported.
+  const dirFor = useCallback(async (path, create) => {
+    let dir = rootHandle;
+    for (const part of path.split('/').slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create });
+    return dir;
+  }, [rootHandle]);
+
+  const writePath = useCallback(async (path, content) => {
+    if (!rootHandle || rootHandle.fallback) return false;
+    const dir = await dirFor(path, true);
+    const handle = await dir.getFileHandle(path.split('/').pop(), { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    return true;
+  }, [rootHandle, dirFor]);
+
+  const removePath = useCallback(async (path) => {
+    if (!rootHandle || rootHandle.fallback) return false;
+    try {
+      const dir = await dirFor(path, false);
+      await dir.removeEntry(path.split('/').pop(), { recursive: true });
+    } catch (e) {
+      if (e?.name !== 'NotFoundError') throw e; // already gone
+    }
+    return true;
+  }, [rootHandle, dirFor]);
+
   // Preload source files into Monaco models (bounded so huge folders don't exhaust memory)
   const readAllFiles = useCallback(async (tree) => {
     const results = [];
@@ -202,6 +231,7 @@ export function useFileSystem() {
 
   return {
     rootName, fileTree, isLoading, error, isSupported,
-    openFolder, readFile, writeFile, createFile, deleteEntry, refreshTree, readAllFiles
+    openFolder, readFile, writeFile, createFile, deleteEntry, refreshTree, readAllFiles,
+    writePath, removePath,
   };
 }

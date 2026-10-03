@@ -37,7 +37,13 @@ const pyodideCoreRequests = [];
 page.on('request', r => { if (/pyodide\.asm\.(js|wasm)|python_stdlib\.zip/.test(r.url())) pyodideCoreRequests.push(r.url()); });
 const cdnMonacoRequests = [];
 page.on('request', r => { if (/monaco-editor/.test(r.url()) && !r.url().startsWith(new URL(BASE).origin)) cdnMonacoRequests.push(r.url()); });
-page.on('console', m => { if (m.type() === 'error') pageErrors.push(`console: ${m.text()}`); });
+page.on('console', m => {
+  if (m.type() !== 'error') return;
+  // A running project's own app (preview iframe / runtime frame) isn't NexIDE
+  if (/webcontainer-api\.io|stackblitz\.com/.test(m.location()?.url || '')) return;
+  const where = m.location()?.url;
+  pageErrors.push(`console: ${m.text()}${where ? ` (${where})` : ''}`);
+});
 // CSP violations anywhere in the page (workers report through console errors)
 await page.addInitScript(() => {
   document.addEventListener('securitypolicyviolation', e => {
@@ -615,10 +621,33 @@ try {
 
     await page.click('#term-tab-shell');
     await page.waitForSelector('#project-shell .xterm', { timeout: 10000 });
-    await page.waitForFunction(() => /❯|\$/.test(document.querySelector('#project-shell .xterm-rows')?.innerText || ''), null, { timeout: 30000 }).catch(() => {});
-    await page.keyboard.type('node -e "console.log(6 * 7)"\n');
-    const shellOk = await page.waitForFunction(() => /\b42\b/.test(document.querySelector('#project-shell .xterm-rows')?.innerText || ''), null, { timeout: 30000 }).then(() => true, () => false);
+    // Run one shell command and wait for its prompt to come back (typing earlier would send the
+    // next command's keystrokes to the still-running process)
+    const prompts = () => page.evaluate(() => (document.querySelector('#project-shell .xterm-rows')?.innerText.match(/❯/g) || []).length);
+    await page.waitForFunction(() => /❯/.test(document.querySelector('#project-shell .xterm-rows')?.innerText || ''), null, { timeout: 30000 }).catch(() => {});
+    const shellRun = async (command) => {
+      const before = await prompts();
+      await page.keyboard.type(`${command}\n`);
+      return page.waitForFunction((n) => (document.querySelector('#project-shell .xterm-rows')?.innerText.match(/❯/g) || []).length > n,
+        before, { timeout: 30000 }).then(() => true, () => false);
+    };
+    await shellRun('node -e "console.log(6 * 7)"');
+    const shellOk = /\b42\b/.test(await terminalText('#project-shell'));
     check('Project: interactive shell runs node', shellOk, shellOk ? '' : (await terminalText('#project-shell')).replace(/\s+/g, ' ').slice(-120));
+
+    // Files the project creates / deletes show up in the explorer (npm's lockfile, shell commands)
+    const treeNames = () => page.$$eval('#sidebar .file-tree-name', els => els.map(e => e.textContent.trim()));
+    const treeHas = (want, notWant = []) => page.waitForFunction(({ want, notWant }) => {
+      const names = [...document.querySelectorAll('#sidebar .file-tree-name')].map(e => e.textContent.trim());
+      return want.every(n => names.filter(x => x === n).length === 1) && notWant.every(n => !names.includes(n));
+    }, { want, notWant }, { timeout: 15000 }).then(() => true, () => false);
+    await shellRun('mkdir -p src/lib && echo "export const answer = 42;" > src/lib/answer.js && echo "todo" > notes.txt');
+    const created = await treeHas(['lib', 'notes.txt', 'package-lock.json']);
+    await shellRun('rm notes.txt');
+    const deleted = await treeHas(['lib'], ['notes.txt']);
+    check('Project: files created or deleted by the project appear in the explorer', created && deleted,
+      `created=${created} deleted=${deleted} · tree: ${(await treeNames()).join(', ')}` +
+      (created && deleted ? '' : ` · shell: ${(await terminalText('#project-shell')).split('\n').filter(Boolean).slice(-5).join(' | ')}`));
 
     await run(); // Stop
     const stopped = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Stopped', null, { timeout: 15000 }).then(() => true, () => false);

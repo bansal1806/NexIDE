@@ -81,7 +81,7 @@ export default function App() {
     cloudMode, githubMode, githubInfo, visibleCloudProjects,
     tabs, setTabs, setActiveTabId, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
-    buildRunFiles, projectFiles, newProjectFromTemplate,
+    buildRunFiles, projectFiles, newProjectFromTemplate, applyRuntimeChanges,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   } = useWorkspace({
@@ -116,8 +116,8 @@ export default function App() {
   } = usePython();
 
   // ── Node.js projects (package.json at the root) run in the in-browser runtime ──
-  const project = useProject();
-  const { reset: resetProject, writeFile: syncProjectFile } = project;
+  const project = useProject({ onFilesChanged: applyRuntimeChanges });
+  const { reset: resetProject, writeFile: syncProjectFile, rescan: rescanProject } = project;
   const projectUnsupported = useMemo(() => projectRuntimeUnsupportedReason(), []);
   // GitHub repos load file contents lazily, so they can't be mounted (yet)
   const isProject = !githubMode && !!findNodeByPath(fileTree, 'package.json');
@@ -358,7 +358,7 @@ export default function App() {
                 onOpenFolder={handleOpenFolder}
                 onFileClick={openFileInTab}
                 activeFilePath={activeTab?.path}
-                onRefresh={handleRefreshTree}
+                onRefresh={() => { if (projectActive) rescanProject(); handleRefreshTree(); }}
                 githubMode={githubMode}
                 githubInfo={githubInfo}
                 cloudMode={cloudMode}
