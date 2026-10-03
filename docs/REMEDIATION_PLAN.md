@@ -226,8 +226,19 @@ Turbopack ❌ (needs native binaries). Templates pin `next@15.4.11`; newer versi
 - [x] CSP: `frame-src` adds only `https://stackblitz.com` and `https://*.webcontainer-api.io` (e2e-enforced).
 - Verification: lint clean · unit 99/99 · E2E 63/63 (incl. React start/HMR/shell/stop, Next.js page/API/edit, axe).
 
+Production E2E after merge: 54/54 (incl. all project checks on nex-ide.vercel.app).
+
+### 12.2 Runtime → workspace file sync ✅ (branch `project-sync`)
+- [x] Recursive watch of the runtime's files: what the project creates, changes or deletes (generators,
+  `npm`'s lockfile, shell commands) reaches the workspace. Ignores `node_modules`, hidden and build
+  output, binaries, files over 512 KB.
+- [x] Editor writes are recorded so they don't echo back; the watcher pauses while a restart clears files.
+- [x] Safety net: a rescan after each shell command and on the explorer's Refresh (watch events can be missed).
+- [x] Applied per workspace: starter projects in memory, local folders written to disk, cloud projects saved.
+- [x] Clean open tabs follow the project; unsaved edits are never overwritten (notice instead).
+- Verification: lint clean · unit 106/106 · E2E 64/64.
+
 ### Next steps
-- 12.2 Files created in the runtime (generators, `npm i` lockfiles) appear in the explorer; save back to disk.
 - 12.3 IntelliSense from the project's own `node_modules` types; TypeScript templates.
 - 12.4 Run GitHub repos as projects (bulk file fetch); more templates (Svelte, Astro, Remix).
 - 12.5 Persist `node_modules` between visits for faster restarts.
