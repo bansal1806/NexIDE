@@ -14,7 +14,10 @@ const TEMPLATES = {
   ts:   { file: 'main.ts',    lang: 'typescript' },
 };
 // File each project template opens first
-const PROJECT_ENTRY = { next: 'app/page.jsx', react: 'src/App.jsx', vue: 'src/App.vue', express: 'server.js' };
+const PROJECT_ENTRY = {
+  next: 'app/page.jsx', 'next-ts': 'app/page.tsx', react: 'src/App.jsx', 'react-ts': 'src/App.tsx',
+  vue: 'src/App.vue', express: 'server.js',
+};
 
 let tabIdCounter = 1;
 

@@ -254,6 +254,218 @@ button {
 `,
 };
 
+// Shared look for the TypeScript starters
+const TS_CSS = `body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #1b1726;
+  color: #f7f3ff;
+}
+
+main {
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 24px;
+}
+
+a { color: #8fd8ff; }
+.muted { color: #cfc6e6; }
+
+button {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: 2px solid #0d0b13;
+  border-radius: 999px;
+  background: #8fd8ff;
+  color: #0d0b13;
+  cursor: pointer;
+}
+`;
+
+const NEXT_TS = {
+  'package.json': json({
+    name: 'my-next-ts-app',
+    private: true,
+    scripts: { dev: 'next dev', build: 'next build', start: 'next start' },
+    dependencies: { next: '15.4.11', react: '19.1.0', 'react-dom': '19.1.0' },
+    devDependencies: { typescript: '^5.8.0', '@types/node': '^22.0.0', '@types/react': '^19.1.0', '@types/react-dom': '^19.1.0' },
+  }),
+  'tsconfig.json': json({
+    compilerOptions: {
+      target: 'ES2017',
+      lib: ['dom', 'dom.iterable', 'esnext'],
+      allowJs: true,
+      skipLibCheck: true,
+      strict: true,
+      noEmit: true,
+      esModuleInterop: true,
+      module: 'esnext',
+      moduleResolution: 'bundler',
+      resolveJsonModule: true,
+      isolatedModules: true,
+      jsx: 'preserve',
+      incremental: true,
+      plugins: [{ name: 'next' }],
+      paths: { '@/*': ['./*'] },
+    },
+    include: ['next-env.d.ts', '**/*.ts', '**/*.tsx', '.next/types/**/*.ts'],
+    exclude: ['node_modules'],
+  }),
+  'next-env.d.ts': `/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+`,
+  'next.config.ts': `import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {};
+
+export default nextConfig;
+`,
+  'lib/greeting.ts': `export type Visitor = { name: string; visits: number };
+
+export function greet(visitor: Visitor): string {
+  return \`Hello \${visitor.name}, visit #\${visitor.visits}\`;
+}
+`,
+  'app/layout.tsx': `import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: 'My Next.js + TypeScript app',
+  description: 'Built in NexIDE',
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+`,
+  'app/page.tsx': `import { greet } from '@/lib/greeting';
+import Counter from './counter';
+
+export default async function Home() {
+  // Server Component: this runs on the (in-browser) Node.js server
+  const message = greet({ name: 'TypeScript', visits: 1 });
+
+  return (
+    <main>
+      <h1>Hello from Next.js + TypeScript</h1>
+      <p>{message}</p>
+      <p className="muted">Hover a symbol or type a dot for type-aware completions.</p>
+      <Counter start={0} />
+      <p>
+        API route: <a href="/api/hello">/api/hello</a>
+      </p>
+    </main>
+  );
+}
+`,
+  'app/counter.tsx': `'use client';
+
+import { useState } from 'react';
+
+type CounterProps = { start: number };
+
+export default function Counter({ start }: CounterProps) {
+  const [count, setCount] = useState(start);
+  return (
+    <button onClick={() => setCount(c => c + 1)}>
+      Clicked {count} {count === 1 ? 'time' : 'times'}
+    </button>
+  );
+}
+`,
+  'app/api/hello/route.ts': `export function GET(): Response {
+  return Response.json({ message: 'Hello from a typed Next.js API route', time: Date.now() });
+}
+`,
+  'app/globals.css': TS_CSS,
+};
+
+const REACT_TS = {
+  'package.json': json({
+    name: 'my-react-ts-app',
+    private: true,
+    type: 'module',
+    scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+    dependencies: { react: '19.1.0', 'react-dom': '19.1.0' },
+    devDependencies: { vite: '^6.3.0', '@vitejs/plugin-react': '^4.5.0', '@types/react': '^19.1.0', '@types/react-dom': '^19.1.0' },
+  }),
+  'tsconfig.json': json({
+    compilerOptions: {
+      target: 'ES2020',
+      useDefineForClassFields: true,
+      lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+      module: 'ESNext',
+      skipLibCheck: true,
+      moduleResolution: 'bundler',
+      allowImportingTsExtensions: true,
+      isolatedModules: true,
+      moduleDetection: 'force',
+      noEmit: true,
+      jsx: 'react-jsx',
+      strict: true,
+    },
+    include: ['src'],
+  }),
+  'vite.config.ts': `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+});
+`,
+  'index.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My React + TypeScript app</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`,
+  'src/vite-env.d.ts': `/// <reference types="vite/client" />
+`,
+  'src/main.tsx': `import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './index.css';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App title="Hello from React + TypeScript" />
+  </StrictMode>,
+);
+`,
+  'src/App.tsx': `import { useState } from 'react';
+
+type AppProps = { title: string };
+
+export default function App({ title }: AppProps) {
+  const [count, setCount] = useState(0);
+
+  return (
+    <main>
+      <h1>{title}</h1>
+      <p>Edit <code>src/App.tsx</code> — types are checked as you type, and changes hot-reload.</p>
+      <button onClick={() => setCount(c => c + 1)}>
+        Clicked {count} {count === 1 ? 'time' : 'times'}
+      </button>
+    </main>
+  );
+}
+`,
+  'src/index.css': TS_CSS,
+};
+
 const EXPRESS = {
   'package.json': json({
     name: 'my-express-api',
@@ -293,7 +505,9 @@ app.listen(port, () => console.log(\`API listening on http://localhost:\${port}\
 
 export const PROJECT_TEMPLATES = [
   { id: 'next',    emoji: '▲',  label: 'Next.js',      blurb: 'App Router, API routes', tone: 'lilac', files: NEXT },
+  { id: 'next-ts', emoji: 'TS', label: 'Next.js + TS', blurb: 'typed, with IntelliSense', tone: 'lemon', files: NEXT_TS },
   { id: 'react',   emoji: '⚛️', label: 'React + Vite', blurb: 'hot reload, JSX',        tone: 'sky',   files: REACT },
+  { id: 'react-ts', emoji: 'TS', label: 'React + TS',  blurb: 'Vite, strict types',     tone: 'pink',  files: REACT_TS },
   { id: 'vue',     emoji: '💚', label: 'Vue + Vite',   blurb: 'single-file components', tone: 'mint',  files: VUE },
   { id: 'express', emoji: '🚂', label: 'Express API',  blurb: 'a real Node.js server',  tone: 'peach', files: EXPRESS },
 ];
