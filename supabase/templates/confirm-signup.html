@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>Welcome to the playground!</title>
+</head>
+<body style="margin:0;padding:0;background:#f3efff;">
+  <!-- Inbox preview text (hidden) -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:#f3efff;">Confirm your email and your coding playground is ready to go.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3efff;">
+    <tr>
+      <td align="center" style="padding:32px 14px 40px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+
+          <!-- Wordmark -->
+          <tr>
+            <td align="center" style="padding-bottom:20px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background:#ffe27a;border:3px solid #0d0b13;border-right-width:7px;border-bottom-width:7px;border-radius:12px;padding:6px 12px;font-size:20px;line-height:24px;">⚡</td>
+                  <td style="padding-left:10px;font-family:'Arial Rounded MT Bold', 'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:28px;font-weight:bold;color:#0d0b13;letter-spacing:-0.5px;">nexide</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background:#fffdf7;border:3px solid #0d0b13;border-right-width:7px;border-bottom-width:7px;border-radius:22px;padding:34px 30px 30px;" align="center">
+
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
+            <tr>
+              <td align="center" valign="middle" width="76" height="76" style="background:#7df2c6;border:3px solid #0d0b13;border-right-width:7px;border-bottom-width:7px;border-radius:22px;font-size:40px;line-height:76px;">🎈</td>
+            </tr>
+          </table>
+              <h1 style="margin:22px 0 6px;font-family:'Arial Rounded MT Bold', 'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:27px;line-height:1.25;color:#0d0b13;">Welcome to the playground!</h1>
+              <p style="margin:0 0 4px;font-family:'Arial Rounded MT Bold', 'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:17px;line-height:1.5;color:#2a2438;">
+                <span style="background:#7df2c6;border:2px solid #0d0b13;border-radius:8px;padding:1px 8px;font-weight:bold;color:#0d0b13;">You’re one click away.</span>
+              </p>
+              <div style="margin:18px 0 22px;font-family:'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:15.5px;line-height:1.65;color:#2a2438;text-align:center;">
+                Tap the big button to confirm <b>{{ .Email }}</b> and unlock your cloud projects.
+
+          <div style="margin:20px 0 2px;text-align:center;line-height:2.6;">
+            <span style="display:inline-block;margin:0 3px;padding:5px 12px;line-height:1.4;background:#ffe27a;border:2px solid #0d0b13;border-radius:999px;font-family:'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:12.5px;font-weight:bold;color:#0d0b13;white-space:nowrap;">▶ Run JS & Python</span>
+            <span style="display:inline-block;margin:0 3px;padding:5px 12px;line-height:1.4;background:#c9b0ff;border:2px solid #0d0b13;border-radius:999px;font-family:'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:12.5px;font-weight:bold;color:#0d0b13;white-space:nowrap;">▲ Next.js in a tab</span>
+            <span style="display:inline-block;margin:0 3px;padding:5px 12px;line-height:1.4;background:#8fd8ff;border:2px solid #0d0b13;border-radius:999px;font-family:'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:12.5px;font-weight:bold;color:#0d0b13;white-space:nowrap;">⏪ Time-travel debug</span>
+          </div>
+              </div>
+
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 0;">
+            <tr>
+              <td align="center" style="background:#7df2c6;border:3px solid #0d0b13;border-right-width:7px;border-bottom-width:7px;border-radius:999px;">
+                <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;padding:15px 34px;font-family:'Arial Rounded MT Bold', 'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:18px;font-weight:bold;color:#0d0b13;text-decoration:none;letter-spacing:0.3px;">Confirm my email ✨</a>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:22px 0 0;font-family:'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:12.5px;line-height:1.6;color:#5f5675;">
+            Button being shy? Paste this into your browser:<br>
+            <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#5b3fd1;word-break:break-all;">{{ .ConfirmationURL }}</a>
+          </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding:24px 16px 0;font-family:'Trebuchet MS', 'Segoe UI', Helvetica, Arial, sans-serif;font-size:12.5px;line-height:1.7;color:#5f5675;">
+              Someone (hopefully you!) signed up for NexIDE with this address. Didn't ask for this? Just ignore it — nothing changes and nobody gets in.<br>
+              Made with 💜 (and a little too much coffee) by the NexIDE robots 🤖<br>
+              <a href="{{ .SiteURL }}" target="_blank" style="color:#5b3fd1;font-weight:bold;text-decoration:none;">Open NexIDE →</a>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
