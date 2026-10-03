@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { AuthContext } from './authContextDef';
+import { readAuthLinkError } from '../utils/authLink';
 
 const notConfigured = async () => ({
   data: null,
@@ -10,6 +11,12 @@ const notConfigured = async () => ({
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(() => !!(supabase && supabase.auth));
+  const [linkError, setLinkError] = useState(() => readAuthLinkError(window.location.hash));
+
+  // Don't leave the error in the address bar (or in bookmarks)
+  useEffect(() => {
+    if (linkError) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, [linkError]);
 
   useEffect(() => {
     if (!supabase || !supabase.auth) return;
@@ -43,17 +50,26 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const value = supabase ? {
-    signUp: (data) => supabase.auth.signUp(data),
+    // Confirmation links return to the site the user signed up on (it must be in the project's
+    // Redirect URLs; otherwise Supabase falls back to its Site URL)
+    signUp: (data) => supabase.auth.signUp({
+      ...data,
+      options: { emailRedirectTo: window.location.origin, ...data?.options },
+    }),
     signIn: (data) => supabase.auth.signInWithPassword(data),
     signOut: () => supabase.auth.signOut(),
     user,
     isConfigured: true,
+    linkError,
+    clearLinkError: () => setLinkError(null),
   } : {
     signUp: notConfigured,
     signIn: notConfigured,
     signOut: notConfigured,
     user: null,
     isConfigured: false,
+    linkError,
+    clearLinkError: () => setLinkError(null),
   };
 
   return (
