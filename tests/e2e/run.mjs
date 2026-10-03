@@ -118,6 +118,12 @@ try {
   await run();
   check('JS: sync + top-level await', await waitConsole(/awaited \{a: \[1, 2\]\}/));
   check('JS: async timer output after completion', await waitConsole(/timer fired/));
+  // Screen readers get one summary (the console itself is not a live region; it would read every line)
+  const announced = () => page.textContent('#announcer').catch(() => '');
+  const runSummary = await announced();
+  const consoleQuiet = await page.getAttribute('.console-lines', 'aria-live');
+  check('A11y: a run is announced as one summary, not line by line',
+    /^Run finished in \d+ ms, 2 lines of output\.$/.test(runSummary) && consoleQuiet === 'off', `${JSON.stringify(runSummary)} console aria-live=${consoleQuiet}`);
 
   await setCode(`let leaked = 'none';\ntry { leaked = localStorage.getItem('nexide:settings'); } catch (e) { console.log('localStorage blocked:', e.name); }\nconsole.log('document is', typeof document);\nconsole.log('leaked=' + leaked);`);
   await run();
@@ -147,6 +153,9 @@ try {
   await setCode(`const a = 1;\nconst = 2;`);
   await run();
   check('JS: syntax error reports line', await waitConsole(/SyntaxError.*\(line 2\)/));
+  const failSummary = await page.waitForFunction(() => /^Run failed: SyntaxError.*\(line 2\)/.test(document.querySelector('#announcer')?.textContent || ''), null, { timeout: 5000 })
+    .then(() => true, () => false);
+  check('A11y: a failed run announces its error', failSummary, failSummary ? '' : JSON.stringify(await page.textContent('#announcer')));
 
   for (const n of [1, 2]) {
     await setCode(`console.log("version ${n}")`);
@@ -611,6 +620,8 @@ try {
     check('Project: React + Vite installs, starts and renders in the preview',
       react.idle === 'Start' && react.ready && rendered.ok,
       `${react.secs}s · ${rendered.ok ? 'rendered' : `preview: ${JSON.stringify(rendered.text.slice(0, 80))} · output: ${(await terminalText('#project-output')).replace(/\s+/g, ' ').slice(-200)}`}`);
+    const projectSummary = await page.textContent('#announcer').catch(() => '');
+    check('A11y: project progress is announced', /Dev server running/.test(projectSummary), JSON.stringify(projectSummary));
 
     await page.evaluate(() => {
       const editor = window.monaco.editor.getEditors()[0];
