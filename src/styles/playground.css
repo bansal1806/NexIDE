@@ -836,6 +836,7 @@ kbd {
 .spin { animation: spin 0.9s linear infinite; }
 
 .pg-tone-lilac { background: var(--accent-violet); }
+.pg-tone-pink { background: var(--accent-pink); }
 .pg-template:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: var(--shadow-sm); }
 .pg-template-project .pg-template-emoji { font-family: var(--font-display); font-weight: 700; }
 .pg-section-note { margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); }

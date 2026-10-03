@@ -238,8 +238,21 @@ Production E2E after merge: 54/54 (incl. all project checks on nex-ide.vercel.ap
 - [x] Clean open tabs follow the project; unsaved edits are never overwritten (notice instead).
 - Verification: lint clean · unit 106/106 · E2E 64/64.
 
+Production E2E after merge: 55/55.
+
+### 12.3 IntelliSense from installed packages ✅ (branch `project-intellisense`)
+- [x] After `npm install` (and when package.json / tsconfig change), a Node script in the runtime collects the
+  installed packages' declarations in one pass: dependency graph breadth-first, `@types` companions,
+  24 MB / 8,000-file budget. React + TS: ~230 files; Next.js + TS: ~1,700.
+- [x] Monaco's TypeScript service gets them as extra libs plus the project's tsconfig options (strict, jsx,
+  `paths` aliases such as `@/*`). Default options: bundler resolution, react-jsx, JSON modules, not strict.
+  Cleared when the workspace changes.
+- [x] Next.js + TypeScript and React + TypeScript starters.
+- [x] Fixed for Monaco 0.57: the TypeScript API now lives at `monaco.typescript`.
+- Verification: lint clean · unit 113/113 · E2E 67/67 (twice): no false errors in a TS project, a real type
+  error is caught, completions come from the installed React types.
+
 ### Next steps
-- 12.3 IntelliSense from the project's own `node_modules` types; TypeScript templates.
 - 12.4 Run GitHub repos as projects (bulk file fetch); more templates (Svelte, Astro, Remix).
 - 12.5 Persist `node_modules` between visits for faster restarts.
 

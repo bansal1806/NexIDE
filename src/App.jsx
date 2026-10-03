@@ -116,13 +116,25 @@ export default function App() {
   } = usePython();
 
   // ── Node.js projects (package.json at the root) run in the in-browser runtime ──
-  const project = useProject({ onFilesChanged: applyRuntimeChanges });
+  // Installed packages' types → editor IntelliSense (cleared again when the workspace changes)
+  const typesApplied = useRef(false);
+  const applyProjectTypes = useCallback((files, tsconfig) => {
+    typesApplied.current = true;
+    import('./lib/projectTypes').then(m => m.setProjectTypes(files, tsconfig));
+  }, []);
+  const project = useProject({ onFilesChanged: applyRuntimeChanges, onTypes: applyProjectTypes });
   const { reset: resetProject, writeFile: syncProjectFile, rescan: rescanProject } = project;
   const projectUnsupported = useMemo(() => projectRuntimeUnsupportedReason(), []);
   // GitHub repos load file contents lazily, so they can't be mounted (yet)
   const isProject = !githubMode && !!findNodeByPath(fileTree, 'package.json');
   const projectActive = isProject && !projectUnsupported;
-  useEffect(() => { resetProject(); }, [workspaceKey, resetProject]);
+  useEffect(() => {
+    resetProject();
+    if (typesApplied.current) {
+      typesApplied.current = false;
+      import('./lib/projectTypes').then(m => m.setProjectTypes());
+    }
+  }, [workspaceKey, resetProject]);
 
   const startProject = useCallback(() => {
     setBottomPanel('terminal');
