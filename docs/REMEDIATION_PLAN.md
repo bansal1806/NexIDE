@@ -280,7 +280,17 @@ Production E2E after merge: 59/59.
 **Phase 12 complete.** Ideas beyond it: Remix / SvelteKit / Nuxt starters, pushing changes back to GitHub
 (needs OAuth), and a pnpm option.
 
+Production E2E after merge: 60/60 (dependency cache live: 29s → 7s).
+
+## Phase 13 — Screen-reader announcements ✅ (branch `run-announcements`)
+- [x] One polite live region (`#announcer`) speaks a short summary: "Run finished in 12 ms, 3 lines of output.",
+  "Run failed: TypeError … (line 3)", and project steps ("Installing dependencies.", "Restoring saved
+  dependencies.", "Dev server running. The preview is ready.", "Project failed: …").
+- [x] The console is no longer a live region (it read every output line aloud) and the status bar's duplicate
+  live label is gone; both stay navigable.
+- [x] Late async output after a run doesn't change (re-announce) the summary.
+- Verification: lint clean · unit 129/129 · E2E 72/72 (twice).
+
 ## Ideas for a later phase
 
-- Screen-reader announcements for run results (polite live region summarising "Completed in 12 ms" / errors).
 - Restore a Supabase project for production sign-in and cloud workspaces (**[YOU]**, dashboard).

@@ -78,8 +78,6 @@ export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 
         className="statusbar-item"
         id="statusbar-status"
         title={`Execution status: ${st.label}`}
-        aria-live="polite"
-        aria-label={`Status: ${st.label}`}
       >
         <div className={`statusbar-indicator ${st.color}`} aria-hidden="true" />
         {status === 'running' && (
