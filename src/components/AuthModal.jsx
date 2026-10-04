@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { useDialog } from '../hooks/useDialog';
 import { X, Mail, Lock, User, LogIn, UserPlus, Loader2, LogOut, KeyRound } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { signUpOutcome, friendlyAuthError } from '../utils/authLink';
 
 export function AuthModal({ open, onClose }) {
   const { signIn, signUp, signOut, user, recovery, completeRecovery, resetPassword } = useAuth();
@@ -28,12 +29,21 @@ export function AuthModal({ open, onClose }) {
         if (error) throw error;
         onClose();
       } else {
-        const { error } = await signUp({ email, password });
+        const { data, error } = await signUp({ email, password });
         if (error) throw error;
-        setMessage('Check your email for the confirmation link!');
+        const outcome = signUpOutcome(data);
+        if (outcome === 'signed-in') {
+          onClose();
+        } else if (outcome === 'exists') {
+          // Supabase sends no email for an address that already has an account
+          setIsLogin(true);
+          setMessage('This email already has an account, so no new email was sent. Log in below, or use "Forgot password?".');
+        } else {
+          setMessage('Check your email for the confirmation link (and your spam folder, just in case).');
+        }
       }
     } catch (err) {
-      setError(err.message);
+      setError(friendlyAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -46,7 +56,7 @@ export function AuthModal({ open, onClose }) {
     setError(null);
     const { error } = await completeRecovery(password);
     setLoading(false);
-    if (error) setError(error.message);
+    if (error) setError(friendlyAuthError(error));
     else setPassword('');
   };
 
@@ -57,7 +67,7 @@ export function AuthModal({ open, onClose }) {
     setLoading(true);
     const { error } = await resetPassword(email);
     setLoading(false);
-    if (error) setError(error.message);
+    if (error) setError(friendlyAuthError(error));
     else setMessage('Check your email for a link to choose a new password.');
   };
 
@@ -68,7 +78,7 @@ export function AuthModal({ open, onClose }) {
       if (error) throw error;
       onClose();
     } catch (err) {
-      setError(err.message);
+      setError(friendlyAuthError(err));
     } finally {
       setLoading(false);
     }
