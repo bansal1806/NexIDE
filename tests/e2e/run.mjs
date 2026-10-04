@@ -41,6 +41,9 @@ page.on('console', m => {
   if (m.type() !== 'error') return;
   // A running project's own app (preview iframe / runtime frame) isn't NexIDE
   if (/webcontainer-api\.io|stackblitz\.com/.test(m.location()?.url || '')) return;
+  // The expired-link check answers Supabase's verify with a mocked 403 on purpose; browsers log any
+  // failed response, even when the app handles it (it shows "expired or was already used")
+  if (/\/auth\/v1\/verify/.test(m.location()?.url || '') && /status of 403/.test(m.text())) return;
   const where = m.location()?.url;
   pageErrors.push(`console: ${m.text()}${where ? ` (${where})` : ''}`);
 });
@@ -796,6 +799,67 @@ try {
       `dialog=${dialog} cleaned=${cleaned} notice=${JSON.stringify(notice)}`);
     await page.keyboard.press('Escape');
     await page.goto(BASE);
+  }
+
+  // ── Auth: our email links (/auth/confirm?token_hash=…) are verified by the app itself ──
+  // Supabase is mocked (no real accounts or emails). Builds without Supabase settings skip this.
+  {
+    const configured = await page.evaluate(async () => {
+      const html = await (await fetch('/')).text();
+      const entry = html.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1];
+      return !!entry && /\.supabase\.co/.test(await (await fetch(entry)).text());
+    });
+    if (!configured) {
+      console.log('SKIP  Auth: email confirmation links (this build has no Supabase settings)');
+    } else {
+      const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const user = { id: '00000000-0000-4000-8000-0000000000e2', aud: 'authenticated', role: 'authenticated', email: 'e2e@nexide.test', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() };
+      const session = {
+        access_token: `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, aud: 'authenticated', role: 'authenticated', email: user.email, exp })}.sig`,
+        token_type: 'bearer', expires_in: 3600, expires_at: exp, refresh_token: 'e2e-refresh', user,
+      };
+      const verifyCalls = [];
+      await page.route('**/auth/v1/verify**', async r => {
+        const body = r.request().postDataJSON();
+        verifyCalls.push(body);
+        return body.token_hash === 'expired-hash'
+          ? r.fulfill({ status: 403, json: { code: 403, error_code: 'otp_expired', msg: 'Email link is invalid or has expired' } })
+          : r.fulfill({ json: session });
+      });
+      await page.route('**/auth/v1/user**', r => r.fulfill({ json: user }));     // updateUser (new password)
+      await page.route('**/auth/v1/logout**', r => r.fulfill({ status: 204, body: '' }));
+      await page.route('**/rest/v1/**', r => r.fulfill({ json: [] }));          // settings / projects
+      const notice = () => page.textContent('.statusbar [role="status"], .statusbar [role="alert"]').catch(() => '');
+      const arrive = async (query) => { await page.goto('about:blank'); await page.goto(`${BASE}auth/confirm?${query}`); };
+      const signOut = () => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)));
+
+      await arrive('token_hash=good-hash&type=email');
+      const confirmed = await page.waitForFunction(() => /Email confirmed/.test(document.querySelector('.statusbar')?.textContent || ''), null, { timeout: 10000 }).then(() => true, () => false);
+      const cleanUrl = new URL(page.url()).pathname === '/' && !new URL(page.url()).search;
+      check('Auth: an email link is verified by the app (scanner-safe) and signs the user in',
+        confirmed && cleanUrl && verifyCalls[0]?.token_hash === 'good-hash' && verifyCalls[0]?.type === 'email',
+        `confirmed=${confirmed} cleanUrl=${cleanUrl} notice=${JSON.stringify(await notice())}`);
+      await signOut();
+
+      await arrive('token_hash=expired-hash&type=email');
+      const expired = await page.waitForFunction(() => /expired or was already used/.test(document.querySelector('.statusbar')?.textContent || ''), null, { timeout: 10000 }).then(() => true, () => false);
+      check('Auth: an expired email link explains itself', expired, JSON.stringify(await notice()));
+
+      await arrive('token_hash=reset-hash&type=recovery');
+      const form = await page.waitForSelector('#auth-new-password-form', { timeout: 10000 }).then(() => true, () => false);
+      let saved = false;
+      if (form) {
+        await page.fill('#auth-new-password', 'a-brand-new-password');
+        await page.click('#auth-new-password-form button[type="submit"]');
+        saved = await page.waitForFunction(() => /Password updated/.test(document.querySelector('.statusbar')?.textContent || ''), null, { timeout: 10000 }).then(() => true, () => false);
+      }
+      check('Auth: a password-reset link asks for a new password and saves it', form && saved, `form=${form} saved=${saved}`);
+
+      await signOut();
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await page.goto(BASE);
+    }
   }
 
   // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
