@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readAuthLinkError, readAuthConfirmLink, confirmedMessage } from './authLink';
+import { readAuthLinkError, readAuthConfirmLink, confirmedMessage, signUpOutcome, friendlyAuthError } from './authLink';
 
 describe('readAuthLinkError', () => {
   it('explains an expired or reused email link', () => {
@@ -36,5 +36,24 @@ describe('confirmedMessage', () => {
     expect(confirmedMessage('email')).toMatch(/Email confirmed/);
     expect(confirmedMessage('recovery')).toMatch(/new password/);
     expect(confirmedMessage('email_change')).toMatch(/new email address/);
+  });
+});
+
+describe('signUpOutcome', () => {
+  it('tells apart new accounts, existing ones and instant sign-ins', () => {
+    expect(signUpOutcome({ user: { identities: [{ provider: 'email' }] }, session: null })).toBe('check-email');
+    expect(signUpOutcome({ user: { identities: [] }, session: null })).toBe('exists');
+    expect(signUpOutcome({ user: { identities: [{}] }, session: { access_token: 'x' } })).toBe('signed-in');
+    expect(signUpOutcome(null)).toBe('check-email');
+  });
+});
+
+describe('friendlyAuthError', () => {
+  it('explains common auth failures', () => {
+    expect(friendlyAuthError({ message: 'Error sending confirmation email' })).toMatch(/SMTP/);
+    expect(friendlyAuthError({ message: 'email rate limit exceeded' })).toMatch(/Too many emails/);
+    expect(friendlyAuthError({ message: 'Invalid login credentials' })).toMatch(/Wrong email or password/);
+    expect(friendlyAuthError({ message: 'Email not confirmed' })).toMatch(/confirm your email/);
+    expect(friendlyAuthError({ message: 'Something else' })).toBe('Something else');
   });
 });
