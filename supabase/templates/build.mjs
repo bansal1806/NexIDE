@@ -95,7 +95,7 @@ ${cta}
             <td align="center" style="padding:24px 16px 0;font-family:${FONT};font-size:12.5px;line-height:1.7;color:${C.muted};">
               ${footerNote}<br>
               Made with 💜 (and a little too much coffee) by the NexIDE robots 🤖<br>
-              <a href="{{ .SiteURL }}" target="_blank" style="color:#5b3fd1;font-weight:bold;text-decoration:none;">Open NexIDE →</a>
+              <a href="${APP_URL}" target="_blank" style="color:#5b3fd1;font-weight:bold;text-decoration:none;">Open NexIDE →</a>
             </td>
           </tr>
 
@@ -108,7 +108,13 @@ ${cta}
 `;
 }
 
-const linkCta = (label, bg) => button(label, '{{ .ConfirmationURL }}', bg) + fallbackLink('{{ .ConfirmationURL }}');
+// Links go to the app, which verifies the token itself (/auth/confirm → supabase.auth.verifyOtp).
+// Mail scanners that "pre-click" links don't run the app's JavaScript, so they can't use the token
+// up (Supabase's own {{ .ConfirmationURL }} gets consumed by them → "otp_expired"). The app's
+// address is written in here, so the links don't depend on the dashboard's Site URL either.
+export const APP_URL = process.env.NEXIDE_APP_URL || 'https://nex-ide.vercel.app';
+const confirmUrl = (type) => `${APP_URL}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=${type}`;
+const linkCta = (label, bg, type) => button(label, confirmUrl(type), bg) + fallbackLink(confirmUrl(type));
 const notYou = "Didn't ask for this? Just ignore it — nothing changes and nobody gets in.";
 
 const TEMPLATES = {
@@ -121,7 +127,7 @@ const TEMPLATES = {
       highlight: 'You’re one click away.',
       body: `                Tap the big button to confirm <b>{{ .Email }}</b> and unlock your cloud projects.
 ${chips([['▶ Run JS & Python', C.lemon], ['▲ Next.js in a tab', C.lilac], ['⏪ Time-travel debug', C.sky]])}`,
-      cta: linkCta('Confirm my email ✨', C.mint),
+      cta: linkCta('Confirm my email ✨', C.mint, 'email'),
       footerNote: 'Someone (hopefully you!) signed up for NexIDE with this address. ' + notYou,
     }),
   },
@@ -134,7 +140,7 @@ ${chips([['▶ Run JS & Python', C.lemon], ['▲ Next.js in a tab', C.lilac], ['
       highlight: 'A seat in the playground has your name on it.',
       body: `                NexIDE is a browser IDE where you can write, run and <i>rewind</i> code — no installs, no fuss.
                 Accept the invite to set up your account.`,
-      cta: linkCta('Accept my invite 🎉', C.lilac),
+      cta: linkCta('Accept my invite 🎉', C.lilac, 'invite'),
       footerNote: 'You were invited to NexIDE with this address. Not expecting it? Ignore this email.',
     }),
   },
@@ -147,7 +153,7 @@ ${chips([['▶ Run JS & Python', C.lemon], ['▲ Next.js in a tab', C.lilac], ['
       highlight: 'Your magic sign-in link is here.',
       body: `                No password needed — tap the button and you’re in.<br>
                 It works <b>once</b> and expires soon, so don’t let it get cold.`,
-      cta: linkCta('Sign me in 🪄', C.sky),
+      cta: linkCta('Sign me in 🪄', C.sky, 'email'),
       footerNote: 'Someone asked to sign in to NexIDE as {{ .Email }}. ' + notYou,
     }),
   },
@@ -161,7 +167,7 @@ ${chips([['▶ Run JS & Python', C.lemon], ['▲ Next.js in a tab', C.lilac], ['
       body: `                You asked to change your NexIDE email from<br>
                 <b>{{ .Email }}</b> &nbsp;➜&nbsp; <b>{{ .NewEmail }}</b><br>
                 Confirm below and we’ll update your account.`,
-      cta: linkCta('Yep, use this address 📬', C.peach),
+      cta: linkCta('Yep, use this address 📬', C.peach, 'email_change'),
       footerNote: 'Didn’t ask to change your email? Ignore this — your account stays as it is.',
     }),
   },
@@ -174,7 +180,7 @@ ${chips([['▶ Run JS & Python', C.lemon], ['▲ Next.js in a tab', C.lilac], ['
       highlight: 'Happens to the best of us.',
       body: `                Tap the button to choose a new password for <b>{{ .Email }}</b>.<br>
                 The link works once and expires soon.`,
-      cta: linkCta('Choose a new password 🔐', C.lemon),
+      cta: linkCta('Choose a new password 🔐', C.lemon, 'recovery'),
       footerNote: 'Didn’t ask for a reset? Ignore this — your current password keeps working.',
     }),
   },

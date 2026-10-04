@@ -5,12 +5,13 @@ const read = (name) => readFileSync(new URL(`./${name}`, import.meta.url), 'utf8
 const subjects = JSON.parse(read('subjects.json'));
 
 // Supabase fills these in; a template missing its link/code would send a useless email
+// Links carry the token hash to the app's /auth/confirm, with the verifyOtp type it needs
 const REQUIRED = {
-  'confirm-signup': ['{{ .ConfirmationURL }}'],
-  invite: ['{{ .ConfirmationURL }}'],
-  'magic-link': ['{{ .ConfirmationURL }}'],
-  'change-email': ['{{ .ConfirmationURL }}', '{{ .NewEmail }}'],
-  'reset-password': ['{{ .ConfirmationURL }}'],
+  'confirm-signup': ['/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email'],
+  invite: ['/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite'],
+  'magic-link': ['/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email'],
+  'change-email': ['/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email_change', '{{ .NewEmail }}'],
+  'reset-password': ['/auth/confirm?token_hash={{ .TokenHash }}&amp;type=recovery'],
   reauthentication: ['{{ .Token }}'],
 };
 
@@ -23,8 +24,10 @@ describe('Supabase email templates', () => {
     it(`${name}: contains its link/code and only known variables`, () => {
       const html = read(`${name}.html`);
       for (const v of vars) expect(html).toContain(v);
+      // Supabase's own link is consumed by mail scanners that pre-click links
+      expect(html).not.toContain('ConfirmationURL');
       const used = [...html.matchAll(/\{\{\s*\.(\w+)\s*\}\}/g)].map(m => m[1]);
-      expect(used.every(v => ['ConfirmationURL', 'Token', 'SiteURL', 'Email', 'NewEmail'].includes(v))).toBe(true);
+      expect(used.every(v => ['TokenHash', 'Token', 'SiteURL', 'Email', 'NewEmail'].includes(v))).toBe(true);
       // Email-safe: no scripts, external stylesheets or images that clients block
       expect(html).not.toMatch(/<script|<link\s|<img\s|box-shadow|@font-face/i);
     });

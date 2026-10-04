@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
 import { useDialog } from '../hooks/useDialog';
-import { X, Mail, Lock, User, LogIn, UserPlus, Loader2, LogOut } from 'lucide-react';
+import { X, Mail, Lock, User, LogIn, UserPlus, Loader2, LogOut, KeyRound } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 export function AuthModal({ open, onClose }) {
-  const { signIn, signUp, signOut, user } = useAuth();
+  const { signIn, signUp, signOut, user, recovery, completeRecovery, resetPassword } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail]     = useState('');
   const [password, setPassword] = useState('');
@@ -39,6 +39,28 @@ export function AuthModal({ open, onClose }) {
     }
   };
 
+  // From a password-reset link: the user is signed in and picks a new password
+  const handleNewPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    const { error } = await completeRecovery(password);
+    setLoading(false);
+    if (error) setError(error.message);
+    else setPassword('');
+  };
+
+  const handleForgot = async () => {
+    setError(null);
+    setMessage(null);
+    if (!email) { setError('Type your email above first, then press "Forgot password?" again.'); return; }
+    setLoading(true);
+    const { error } = await resetPassword(email);
+    setLoading(false);
+    if (error) setError(error.message);
+    else setMessage('Check your email for a link to choose a new password.');
+  };
+
   const handleLogout = async () => {
     setLoading(true);
     try {
@@ -56,8 +78,8 @@ export function AuthModal({ open, onClose }) {
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Authentication" onClick={onClose}>
       <div className="modal-panel auth-panel" ref={panelRef} tabIndex={-1} onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
         <div className="modal-header">
-          {user ? <User size={14} /> : (isLogin ? <LogIn size={14} /> : <UserPlus size={14} />)}
-          <span>{user ? 'Account' : (isLogin ? 'Login' : 'Sign Up')}</span>
+          {recovery ? <KeyRound size={14} /> : user ? <User size={14} /> : (isLogin ? <LogIn size={14} /> : <UserPlus size={14} />)}
+          <span>{recovery ? 'Choose a new password' : user ? 'Account' : (isLogin ? 'Login' : 'Sign Up')}</span>
           <div style={{ flex: 1 }} />
           <button className="btn-icon" onClick={onClose}>
             <X size={14} />
@@ -65,7 +87,33 @@ export function AuthModal({ open, onClose }) {
         </div>
 
         <div className="modal-body" style={{ padding: '24px' }}>
-          {user ? (
+          {user && recovery ? (
+            <form onSubmit={handleNewPassword} id="auth-new-password-form">
+              {error && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+                You're signed in as <b>{user.email}</b>. Pick a new password to finish.
+              </p>
+              <label className="settings-label" htmlFor="auth-new-password">New password</label>
+              <div className="settings-input-row" style={{ marginBottom: 20 }}>
+                <Lock size={14} style={{ marginLeft: 10, color: 'var(--text-muted)' }} />
+                <input
+                  id="auth-new-password"
+                  type="password"
+                  className="settings-input"
+                  placeholder="At least 6 characters"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  required
+                  minLength={6}
+                />
+              </div>
+              <button className="btn-run" type="submit" disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
+                {loading && <Loader2 size={14} className="animate-spin" />}
+                Save new password
+              </button>
+            </form>
+          ) : user ? (
             <div className="auth-profile">
               <div style={{ textAlign: 'center', marginBottom: 20 }}>
                 <div style={{ 
@@ -124,6 +172,15 @@ export function AuthModal({ open, onClose }) {
                   {loading && <Loader2 size={14} className="animate-spin" />}
                   {isLogin ? 'Login' : 'Create Account'}
                 </button>
+
+                {isLogin && (
+                  <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12 }}>
+                    <button type="button" id="auth-forgot-password" onClick={handleForgot} disabled={loading}
+                      style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', padding: 0 }}>
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
 
                 <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: 'var(--text-muted)' }}>
                   {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
