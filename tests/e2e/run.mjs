@@ -857,6 +857,20 @@ try {
       check('Auth: a password-reset link asks for a new password and saves it', form && saved, `form=${form} saved=${saved}`);
 
       await signOut();
+
+      // Signing up with an address that already has an account: Supabase sends no email (and says
+      // "ok" with an identity-less user), so the app must say so instead of "check your email"
+      await page.route('**/auth/v1/signup**', r => r.fulfill({ json: { user: { ...user, identities: [] } } })); // the shape supabase-js reads (data.user)
+      await page.goto(BASE);
+      await page.click('#btn-topbar-auth');
+      await page.click('button:has-text("Sign Up")');
+      await page.fill('input[type="email"]', 'e2e@nexide.test');
+      await page.fill('input[type="password"]', 'correct-horse-battery');
+      await page.click('[aria-label="Authentication"] button[type="submit"]');
+      const exists = await page.waitForFunction(() => /already has an account/.test(document.querySelector('[aria-label="Authentication"]')?.textContent || ''), null, { timeout: 10000 }).then(() => true, () => false);
+      check('Auth: signing up with a registered email says so (no email is sent)', exists);
+      await page.keyboard.press('Escape');
+
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await page.goto(BASE);
     }
