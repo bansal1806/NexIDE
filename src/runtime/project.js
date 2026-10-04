@@ -111,3 +111,50 @@ export class OutputLog {
     return () => this.listeners.delete(fn);
   }
 }
+
+/**
+ * Notices a process that stops making progress (e.g. npm install on a slow or blocked network).
+ * Call activity() whenever it prints something. After `warnAfter` ms of silence onWarn() fires once
+ * (onRecover() when output resumes); after `failAfter` ms, onFail(). stop() when the process ends.
+ */
+export function createStallWatch({ warnAfter, failAfter, onWarn, onRecover, onFail, interval = 5000, now = () => Date.now() }) {
+  let last = now();
+  let warned = false;
+  let done = false;
+  const timer = setInterval(() => {
+    if (done) return;
+    const idle = now() - last;
+    if (idle >= failAfter) {
+      done = true;
+      clearInterval(timer);
+      onFail?.();
+    } else if (idle >= warnAfter && !warned) {
+      warned = true;
+      onWarn?.();
+    }
+  }, interval);
+  return {
+    activity() {
+      last = now();
+      if (warned && !done) { warned = false; onRecover?.(); }
+    },
+    stop() { done = true; clearInterval(timer); },
+  };
+}
+
+/**
+ * Does a chunk of terminal output show real progress? npm keeps redrawing a spinner (| / - \ or
+ * braille dots) even while stuck, so spinner frames and bare cursor/erase codes don't count.
+ */
+export function isProgressChunk(chunk) {
+  // Matching the terminal's escape character (\x1b) is the point here
+  /* eslint-disable no-control-regex */
+  const text = String(chunk || '')
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')   // ANSI CSI: colours, cursor moves, erase line
+    .replace(/\x1b\][^\x07]*\x07/g, '')       // OSC (window title…)
+    .replace(/[\r\b]/g, '')
+    .replace(/[|/\\\-⠀-⣿]/g, '')     // spinner frames: | / - \ and braille dots
+    .trim();
+  /* eslint-enable no-control-regex */
+  return text.length > 0;
+}

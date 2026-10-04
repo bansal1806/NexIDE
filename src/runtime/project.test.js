@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { toFileSystemTree, parsePackageJson, pickDevScript, minVersion, compatibilityWarnings, OutputLog, shouldSyncPath, normalizeWatchPath, removedPaths } from './project';
+import { toFileSystemTree, parsePackageJson, pickDevScript, minVersion, compatibilityWarnings, OutputLog, shouldSyncPath, normalizeWatchPath, removedPaths, createStallWatch, isProgressChunk } from './project';
 
 describe('toFileSystemTree', () => {
   it('nests files into directories', () => {
@@ -94,5 +94,56 @@ describe('OutputLog', () => {
     unsubscribe();
     log.append('x');
     expect(seen).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('createStallWatch', () => {
+  it('warns after silence, recovers on output, fails after the limit', () => {
+    vi.useFakeTimers();
+    const events = [];
+    const watch = createStallWatch({
+      warnAfter: 60_000, failAfter: 600_000, interval: 5_000,
+      onWarn: () => events.push('warn'), onRecover: () => events.push('recover'), onFail: () => events.push('fail'),
+    });
+    vi.advanceTimersByTime(30_000);
+    watch.activity();
+    vi.advanceTimersByTime(55_000);
+    expect(events).toEqual([]);            // output 55 s ago: still fine
+    vi.advanceTimersByTime(10_000);
+    expect(events).toEqual(['warn']);      // a minute of silence
+    vi.advanceTimersByTime(60_000);
+    expect(events).toEqual(['warn']);      // warns once
+    watch.activity();
+    expect(events).toEqual(['warn', 'recover']);
+    vi.advanceTimersByTime(600_000);
+    expect(events).toEqual(['warn', 'recover', 'warn', 'fail']);
+    vi.advanceTimersByTime(600_000);
+    expect(events).toHaveLength(4);        // nothing after failing
+    vi.useRealTimers();
+  });
+
+  it('stays quiet once stopped', () => {
+    vi.useFakeTimers();
+    const onWarn = vi.fn();
+    const watch = createStallWatch({ warnAfter: 1000, failAfter: 5000, interval: 100, onWarn });
+    watch.stop();
+    vi.advanceTimersByTime(10_000);
+    expect(onWarn).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+});
+
+describe('isProgressChunk', () => {
+  it('ignores npm spinner frames and terminal control codes', () => {
+    expect(isProgressChunk('\x1b[1G|\x1b[0K')).toBe(false);
+    expect(isProgressChunk('\x1b[1G/\x1b[0K')).toBe(false);
+    expect(isProgressChunk('\r⠙')).toBe(false);
+    expect(isProgressChunk('\x1b[?25l\x1b[2K')).toBe(false);
+    expect(isProgressChunk('')).toBe(false);
+  });
+
+  it('counts real output', () => {
+    expect(isProgressChunk('added 63 packages in 34s\r\n')).toBe(true);
+    expect(isProgressChunk('\x1b[1Gnpm warn deprecated inflight@1.0.6\x1b[0K')).toBe(true);
   });
 });
