@@ -48,7 +48,7 @@ const RUNNABLE = new Set(['javascript', 'typescript', 'python']);
 
 export default function App() {
   // ── Auth ─────────────────────────────────────────────────────────
-  const { user, linkError, clearLinkError } = useAuth();
+  const { user, authNotice, clearAuthNotice, recovery, finishRecovery } = useAuth();
   const userId = user?.id ?? null;
 
   const { notice, notify } = useNotice();
@@ -72,7 +72,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [githubOpen, setGithubOpen]   = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [authOpen, setAuthOpen]       = useState(() => !!linkError); // an email link failed: offer sign-in
+  const [authOpen, setAuthOpen]       = useState(() => authNotice?.type === 'error'); // an email link failed: offer sign-in
 
   const editorRef = useRef(null);
 
@@ -296,7 +296,7 @@ export default function App() {
   // ── Derived view state ───────────────────────────────────────────
   const showWelcome = fileTree.length === 0 && tabs.length === 0 && !cloudMode;
   const statusNotice = notice
-    || (linkError ? { type: 'error', text: linkError } : null)
+    || authNotice
     || (fs.error ? { type: 'error', text: fs.error } : null);
 
   const clearConsole = isPythonTab ? clearPy : clearJs;
@@ -530,7 +530,8 @@ export default function App() {
       <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSettingsChange={setSettings} isExhausted={gemini.isExhausted} />
       <GitHubModal open={githubOpen} onClose={() => setGithubOpen(false)} onLoad={handleGitHubLoad} githubToken={settings.githubToken} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} openTabs={tabs} fileTree={fileTree} onOpenFile={openFileInTab} onCommand={handleCommand} />
-      <AuthModal open={authOpen} onClose={() => { setAuthOpen(false); clearLinkError(); }} />
+      {/* A password-reset link signs the user in and asks for a new password */}
+      <AuthModal open={authOpen || recovery} onClose={() => { setAuthOpen(false); clearAuthNotice(); finishRecovery(); }} />
     </div>
   );
 }
