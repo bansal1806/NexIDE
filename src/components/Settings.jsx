@@ -191,6 +191,18 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
             <div className="settings-section-title">
               <Package size={12} /> Projects
             </div>
+            <label className="settings-label" htmlFor="settings-package-manager">Package manager</label>
+            <select
+              id="settings-package-manager"
+              className="settings-select"
+              value={draft.packageManager || 'auto'}
+              onChange={e => update('packageManager', e.target.value)}
+            >
+              <option value="auto">Auto (from package.json / lockfile)</option>
+              <option value="npm">npm</option>
+              <option value="pnpm">pnpm</option>
+              <option value="yarn">yarn (v1)</option>
+            </select>
             <DependencyCache />
           </div>
 

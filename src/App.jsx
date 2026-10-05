@@ -140,8 +140,8 @@ export default function App() {
     setBottomPanel('terminal');
     setRightPanel('preview');
     // GitHub repos load file contents on demand, so running one downloads the rest first
-    project.start(projectFiles, { download: githubMode });
-  }, [project, projectFiles, githubMode]);
+    project.start(projectFiles, { download: githubMode, packageManager: settings.packageManager });
+  }, [project, projectFiles, githubMode, settings.packageManager]);
 
   const onEditorChange = useCallback((value) => {
     handleEditorChange(value);

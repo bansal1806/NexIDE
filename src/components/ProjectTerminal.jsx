@@ -87,6 +87,11 @@ export default function ProjectTerminal({ project }) {
           Shell
         </button>
         <div style={{ flex: 1 }} />
+        {project.packageManager && (
+          <span className="project-pm-badge" id="project-package-manager" title="Package manager used for this project">
+            {project.packageManager}
+          </span>
+        )}
         {project.depsFromCache && (
           <span className="project-cached-badge" id="project-deps-cached" title="node_modules came from an earlier visit, so nothing had to be downloaded again">
             ⚡ Dependencies restored
