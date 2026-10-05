@@ -309,6 +309,29 @@ Production E2E after merge: 60/60 (dependency cache live: 29s → 7s).
 - [x] SvelteKit and Nuxt starters (server load / server routes). Measured on a slow network: SvelteKit ~4 min,
   Nuxt ~9 min for the first install (7+ min of spinner only); later starts restore saved dependencies.
 
+## Phase 16 — Plan: React Router starter, pnpm/yarn, push to GitHub
+Decisions: order starter → pnpm → GitHub · GitHub auth: Settings token first, OAuth later · default when
+committing to main: new branch + PR · include "Publish to GitHub".
+
+### 16.1 React Router v7 starter (Remix's successor)
+- [ ] Framework mode: loader, action (form), resource route; verified in the runtime; e2e check.
+
+### 16.2 pnpm / yarn
+- [ ] P1 Spike: pnpm and yarn 1 in the runtime; node_modules snapshots keep pnpm's symlinks; bin modes.
+- [ ] P2 Detect (packageManager field → lockfile → npm), install/run commands, status chip, Settings override.
+- [ ] P3 Snapshot + type collection for pnpm's layout (follow real paths for transitive deps); e2e with a
+  pnpm repo. Yarn 2+ (PnP) out of scope: say so, fall back to npm.
+
+### 16.3 Push to GitHub
+- [ ] G1 Change tracking against the loaded tree (blob SHAs): modified / added / deleted.
+- [ ] G2 Source Control panel: changed files, Monaco diff view, discard, commit message, target.
+- [ ] G3 Commit via the Git Data API (blobs → tree with base_tree → commit → ref), current branch or new
+  branch + PR (default for main/protected); clear errors.
+- [ ] G4 Branch moved since loading: offer new branch + PR, or reload and re-apply (conflicts listed).
+- [ ] G5 "Sign in with GitHub" via Supabase OAuth (**[YOU]** register a GitHub OAuth App).
+- [ ] G6 Publish a local / cloud / starter project as a new repo.
+- Tests: GitHub mocked in e2e (exact API sequence, stale-branch path); one manual check on a scratch repo.
+
 ## Ideas for a later phase
 
-- Pushing changes back to GitHub (needs OAuth); a pnpm option; Remix starter.
+- A GitHub App (per-repo install, short-lived tokens) for a public launch.
