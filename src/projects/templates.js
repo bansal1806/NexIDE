@@ -773,6 +773,148 @@ button {
 `,
 };
 
+// React Router v7 "framework mode" (what Remix v2 became)
+const REACT_ROUTER = {
+  'package.json': json({
+    name: 'my-react-router-app',
+    private: true,
+    type: 'module',
+    scripts: { dev: 'react-router dev', build: 'react-router build', start: 'react-router-serve ./build/server/index.js' },
+    dependencies: {
+      '@react-router/node': '^7.6.0',
+      '@react-router/serve': '^7.6.0',
+      isbot: '^5.1.0',
+      react: '19.1.0',
+      'react-dom': '19.1.0',
+      'react-router': '^7.6.0',
+    },
+    devDependencies: { '@react-router/dev': '^7.6.0', vite: '^6.3.0' },
+  }),
+  'react-router.config.js': `// Server-side rendering on: loaders and actions run on the (in-browser) Node.js server
+export default { ssr: true };
+`,
+  'vite.config.js': `import { reactRouter } from '@react-router/dev/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [reactRouter()],
+});
+`,
+  'app/root.jsx': `import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
+import './app.css';
+
+export function Layout({ children }) {
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <Meta />
+        <Links />
+      </head>
+      <body>
+        {children}
+        <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
+export default function App() {
+  return <Outlet />;
+}
+`,
+  'app/routes.js': `import { index, route } from '@react-router/dev/routes';
+
+export default [
+  index('routes/home.jsx'),
+  route('api/hello', 'routes/api.hello.js'),
+];
+`,
+  'app/routes/home.jsx': `import { Form, useLoaderData } from 'react-router';
+
+// Kept in the server's memory while the dev server runs
+const notes = ['Loaders read data on the server', 'Actions handle form posts'];
+
+export function meta() {
+  return [{ title: 'My React Router app' }];
+}
+
+export async function loader() {
+  return { notes, renderedAt: new Date().toLocaleTimeString() };
+}
+
+export async function action({ request }) {
+  const form = await request.formData();
+  const text = String(form.get('note') || '').trim();
+  if (text) notes.push(text);
+  return null;
+}
+
+export default function Home() {
+  const { notes, renderedAt } = useLoaderData();
+  return (
+    <main>
+      <h1>Hello from React Router</h1>
+      <p>Edit <code>app/routes/home.jsx</code> — changes appear instantly.</p>
+      <p className="muted">Loaded on the server at {renderedAt}</p>
+      <ul>
+        {notes.map((note, i) => <li key={i}>{note}</li>)}
+      </ul>
+      <Form method="post">
+        <input name="note" placeholder="Add a note…" aria-label="New note" />
+        <button type="submit">Add</button>
+      </Form>
+      <p>Resource route: <a href="/api/hello">/api/hello</a></p>
+    </main>
+  );
+}
+`,
+  'app/routes/api.hello.js': `// A resource route: no component, just data
+export function loader() {
+  return Response.json({ message: 'Hello from a React Router resource route', time: Date.now() });
+}
+`,
+  'app/app.css': `body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #1b1726;
+  color: #f7f3ff;
+}
+
+main {
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 24px;
+}
+
+a { color: #8fd8ff; }
+.muted { color: #cfc6e6; }
+
+input {
+  font: inherit;
+  padding: 8px 12px;
+  margin-right: 8px;
+  border: 2px solid #5b5279;
+  border-radius: 10px;
+  background: #1e1a2b;
+  color: #f7f3ff;
+}
+
+button {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: 2px solid #0d0b13;
+  border-radius: 999px;
+  background: #c9b0ff;
+  color: #0d0b13;
+  cursor: pointer;
+}
+`,
+};
+
 const EXPRESS = {
   'package.json': json({
     name: 'my-express-api',
@@ -820,6 +962,7 @@ export const PROJECT_TEMPLATES = [
   { id: 'astro',   emoji: '🚀', label: 'Astro',        blurb: 'content sites, routes',  tone: 'sky',   files: ASTRO },
   { id: 'sveltekit', emoji: '🧡', label: 'SvelteKit',  blurb: 'full-stack Svelte',       tone: 'peach', files: SVELTEKIT },
   { id: 'nuxt',    emoji: '💚', label: 'Nuxt',         blurb: 'full-stack Vue · big first install', tone: 'mint',  files: NUXT },
+  { id: 'react-router', emoji: '💿', label: 'React Router', blurb: 'loaders & actions (ex-Remix)', tone: 'lilac', files: REACT_ROUTER },
   { id: 'express', emoji: '🚂', label: 'Express API',  blurb: 'a real Node.js server',  tone: 'peach', files: EXPRESS },
 ];
 
