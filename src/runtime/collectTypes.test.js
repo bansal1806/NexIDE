@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { collectTypes, typesPackageFor } from './collectTypes.mjs';
@@ -65,5 +65,42 @@ describe('collectTypes', () => {
     const empty = mkdtempSync(join(tmpdir(), 'nexide-empty-'));
     expect(await collectTypes(empty)).toEqual({ files: {}, truncated: false });
     rmSync(empty, { recursive: true, force: true });
+  });
+});
+
+describe('collectTypes with a pnpm layout', () => {
+  let pnpmRoot;
+  // Directory links: junctions on Windows (no admin rights needed), symlinks elsewhere
+  const link = (target, path) => {
+    mkdirSync(dirname(join(pnpmRoot, path)), { recursive: true });
+    symlinkSync(join(pnpmRoot, target), join(pnpmRoot, path), 'junction');
+  };
+  const putIn = (path, content) => {
+    const full = join(pnpmRoot, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, typeof content === 'string' ? content : JSON.stringify(content));
+  };
+
+  beforeAll(() => {
+    pnpmRoot = mkdtempSync(join(tmpdir(), 'nexide-pnpm-'));
+    putIn('package.json', { devDependencies: { '@types/react': '19' } });
+    // Real packages live under node_modules/.pnpm; only direct dependencies are linked at the top
+    putIn('node_modules/.pnpm/@types+react@19/node_modules/@types/react/package.json', { name: '@types/react', types: 'index.d.ts', dependencies: { csstype: '3' } });
+    putIn('node_modules/.pnpm/@types+react@19/node_modules/@types/react/index.d.ts', "import type * as CSS from 'csstype';");
+    putIn('node_modules/.pnpm/csstype@3/node_modules/csstype/package.json', { name: 'csstype', types: 'index.d.ts' });
+    putIn('node_modules/.pnpm/csstype@3/node_modules/csstype/index.d.ts', 'export interface Properties {}');
+    link('node_modules/.pnpm/csstype@3/node_modules/csstype', 'node_modules/.pnpm/@types+react@19/node_modules/csstype');
+    link('node_modules/.pnpm/@types+react@19/node_modules/@types/react', 'node_modules/@types/react');
+  });
+  afterAll(() => rmSync(pnpmRoot, { recursive: true, force: true }));
+
+  it('finds indirect dependencies next to a package’s real location', async () => {
+    const { files } = await collectTypes(pnpmRoot);
+    expect(Object.keys(files).sort()).toEqual([
+      'node_modules/@types/react/index.d.ts',
+      'node_modules/@types/react/package.json',
+      'node_modules/csstype/index.d.ts',
+      'node_modules/csstype/package.json',
+    ]);
   });
 });

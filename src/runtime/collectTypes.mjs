@@ -2,8 +2,8 @@
 // Runs with Node inside the project runtime (shipped to it as text, saved as .nexide-types.mjs):
 // one local pass is far faster than reading thousands of files from the page one by one.
 // Output: .nexide-types.json → { files: { "node_modules/<pkg>/…d.ts": "…" }, truncated }
-import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, readdir, writeFile, stat, realpath } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
 
 const DECLARATION = /\.d\.[mc]?ts$/;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'test', 'tests', '__tests__', 'docs', 'example', 'examples']);
@@ -54,15 +54,30 @@ export async function collectTypes(root, { maxBytes = 24 * 1024 * 1024, maxFiles
 
   const projectPkg = await readJson(join(root, 'package.json'));
   if (!projectPkg) return { files, truncated };
-  const queue = Object.keys({ ...projectPkg.dependencies, ...projectPkg.devDependencies });
+  // Each entry: a package name and the node_modules folder its parent resolves it from. With npm/yarn
+  // that's the top-level node_modules; pnpm only links direct dependencies there, and keeps each
+  // package's own dependencies next to its real location (node_modules/.pnpm/<pkg>@<v>/node_modules).
+  const topLevel = join(root, 'node_modules');
+  const queue = Object.keys({ ...projectPkg.dependencies, ...projectPkg.devDependencies }).map(name => ({ name, from: topLevel }));
   const seen = new Set();
+  const findPackage = async (name, from) => {
+    for (const base of from === topLevel ? [topLevel] : [from, topLevel]) {
+      try {
+        const real = await realpath(join(base, name));
+        if ((await stat(real)).isDirectory()) return real;
+      } catch { /* not here */ }
+    }
+    return null;
+  };
 
   while (queue.length && !truncated) {
-    const name = queue.shift();
+    const { name, from } = queue.shift();
     if (seen.has(name)) continue;
     seen.add(name);
-    const dir = join(root, 'node_modules', name);
-    try { if (!(await stat(dir)).isDirectory()) continue; } catch { continue; }
+    const dir = await findPackage(name, from);
+    if (!dir) continue;
+    // The node_modules folder holding this package (one level higher for @scope/name)
+    const siblings = name.startsWith('@') ? dirname(dirname(dir)) : dirname(dir);
 
     const pkgPath = `node_modules/${name}/package.json`;
     const pkg = await readJson(join(dir, 'package.json'));
@@ -71,8 +86,8 @@ export async function collectTypes(root, { maxBytes = 24 * 1024 * 1024, maxFiles
     await walk(dir, `node_modules/${name}`, 0);
 
     const typesName = typesPackageFor(name);
-    if (typesName) queue.push(typesName);
-    queue.push(...Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies }));
+    if (typesName) queue.push({ name: typesName, from: siblings });
+    queue.push(...Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies }).map(dep => ({ name: dep, from: siblings })));
   }
   return { files, truncated };
 }

@@ -18,6 +18,13 @@ describe('dependency key', () => {
     expect(dependencySignature({ ...base, overrides: { lodash: '4' } })).not.toBe(sig);
     expect(dependencySignature(base, '{"lockfileVersion":3}')).not.toBe(sig);
   });
+
+  it('separates package managers, keeping npm keys as before', () => {
+    const base = { dependencies: { react: '19' } };
+    expect(dependencySignature(base, null, 'npm')).toBe(dependencySignature(base));
+    expect(dependencySignature(base, null, 'pnpm')).not.toBe(dependencySignature(base, null, 'npm'));
+    expect(dependencySignature(base, null, 'yarn')).not.toBe(dependencySignature(base, null, 'pnpm'));
+  });
 });
 
 describe('planEviction', () => {

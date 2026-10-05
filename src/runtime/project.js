@@ -158,3 +158,39 @@ export function isProgressChunk(chunk) {
   /* eslint-enable no-control-regex */
   return text.length > 0;
 }
+
+// ── Package managers ───────────────────────────────────────────────
+// The runtime ships npm 10, pnpm 8 and yarn 1. Yarn 2+ (Berry, Plug'n'Play) isn't supported there.
+export const LOCKFILES = { npm: 'package-lock.json', pnpm: 'pnpm-lock.yaml', yarn: 'yarn.lock' };
+
+/**
+ * Which package manager a project uses: package.json's "packageManager" field, else its lockfile,
+ * else npm. `files` are the workspace's `{ path, content }` records. Returns { name, lockfile, reason, warning? }.
+ */
+export function detectPackageManager(pkg, files = []) {
+  const at = (path) => files.find(f => f.path === path);
+  const berry = (text) => /^__metadata:/m.test(text || '');
+  const field = String(pkg?.packageManager || '').match(/^(npm|pnpm|yarn)@(\d+)/);
+  const npmFallback = (why) => ({ name: 'npm', lockfile: LOCKFILES.npm, reason: 'fallback',
+    warning: `${why} isn't supported in the browser runtime, so npm is used instead (it ignores yarn.lock).` });
+
+  if (field) {
+    const [, name, major] = field;
+    if (name === 'yarn' && Number(major) >= 2) return npmFallback(`Yarn ${major}`);
+    return { name, lockfile: LOCKFILES[name], reason: 'packageManager field' };
+  }
+  if (at(LOCKFILES.pnpm)) return { name: 'pnpm', lockfile: LOCKFILES.pnpm, reason: LOCKFILES.pnpm };
+  if (at(LOCKFILES.yarn)) {
+    if (berry(at(LOCKFILES.yarn).content)) return npmFallback('Yarn 2+ (Berry)');
+    return { name: 'yarn', lockfile: LOCKFILES.yarn, reason: LOCKFILES.yarn };
+  }
+  return { name: 'npm', lockfile: LOCKFILES.npm, reason: at(LOCKFILES.npm) ? LOCKFILES.npm : 'default' };
+}
+
+/** A user's choice in Settings ('auto' | 'npm' | 'pnpm' | 'yarn') applied on top of detection. */
+export function choosePackageManager(override, detected) {
+  if (override && override !== 'auto' && LOCKFILES[override]) {
+    return { name: override, lockfile: LOCKFILES[override], reason: 'Settings' };
+  }
+  return detected;
+}

@@ -13,6 +13,7 @@ const DEFAULTS = {
   autoSave:     false,
   minimap:      true,
   fontLigatures:true,
+  packageManager: 'auto', // projects: 'auto' (package.json / lockfile) | 'npm' | 'pnpm' | 'yarn'
   rememberSecrets: true,
 };
 
