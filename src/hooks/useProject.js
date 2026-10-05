@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   toFileSystemTree, parsePackageJson, pickDevScript, compatibilityWarnings, OutputLog,
   shouldSyncPath, normalizeWatchPath, removedPaths, MAX_SYNC_BYTES, createStallWatch, isProgressChunk,
+  detectPackageManager, choosePackageManager,
 } from '../runtime/project';
 import { isBinaryName } from '../utils/files';
 import { dependencyKey, loadSnapshot, saveSnapshot } from '../runtime/depsCache';
@@ -61,7 +62,7 @@ visitNodeModules('node_modules', 0);
 
 /**
  * Runs a Node.js project (Next.js, Vite, Express…) in the in-browser runtime:
- * mount files → npm install → npm run dev → preview URL. Also owns an interactive shell.
+ * mount files → install (npm, pnpm or yarn) → run the dev script → preview URL. Also owns a shell.
  * Files the project itself creates, changes or deletes (generators, npm, the shell) are reported
  * through `onFilesChanged([{ type: 'write' | 'delete', path, content? }])`. After installs, the
  * installed packages' type declarations are reported through `onTypes(files, tsconfigText)`.
@@ -240,7 +241,7 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
    * `source`: the files, or an async loader `(onProgress) => files`. With `{ download: true }`
    * the loader fetches them first (a GitHub repo), shown as the 'downloading' step.
    */
-  const start = useCallback(async (source, { download = false } = {}) => {
+  const start = useCallback(async (source, { download = false, packageManager = 'auto' } = {}) => {
     const id = ++runId.current;
     const isCurrent = () => id === runId.current;
     killRun();
@@ -274,6 +275,7 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
     const pkg = parsePackageJson(pkgText);
     if (!pkg) return fail('No valid package.json at the workspace root.');
     const script = pickDevScript(pkg);
+    const pm = choosePackageManager(packageManager, detectPackageManager(pkg, files));
     if (!script) return fail('package.json needs a "dev" or "start" script to run the project.');
 
     try {
@@ -286,7 +288,7 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       // Not watching while the old files are cleared out (those aren't user deletions).
       stopWatching();
       mounted.current = false;
-      const keep = installedFor.current === pkgText ? new Set(['node_modules', 'package-lock.json']) : new Set();
+      const keep = installedFor.current === pkgText ? new Set(['node_modules', pm.lockfile]) : new Set();
       const entries = await wc.fs.readdir('/');
       await Promise.all(entries.filter(name => !keep.has(name)).map(name => wc.fs.rm(name, { recursive: true, force: true })));
       await wc.mount(toFileSystemTree(files));
@@ -296,10 +298,13 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       startWatching(wc);
 
       compatibilityWarnings(pkg).forEach(w => output.append(line(C.yellow, `⚠ ${w}`)));
+      if (pm.warning) output.append(line(C.yellow, `⚠ ${pm.warning}`));
+      else if (pm.name !== 'npm') output.append(line(C.dim, `Using ${pm.name} (from ${pm.reason}).`));
+      setState(s => ({ ...s, packageManager: pm.name }));
 
-      // Dependencies installed on an earlier visit: restore them; npm install then only verifies
-      const userLockfile = files.find(f => f.path === 'package-lock.json')?.content ?? null;
-      const depsKey = await dependencyKey(pkg, userLockfile).catch(() => null);
+      // Dependencies installed on an earlier visit: restore them; the install then only verifies
+      const userLockfile = files.find(f => f.path === pm.lockfile)?.content ?? null;
+      const depsKey = await dependencyKey(pkg, userLockfile, pm.name).catch(() => null);
       let restored = false;
       if (!keep.size && depsKey) {
         const cached = await loadSnapshot(depsKey).catch(() => null);
@@ -308,7 +313,7 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
             output.append(line(C.dim, `Restoring dependencies installed earlier (${mb(cached.snapshot.byteLength)})…`));
             await wc.fs.mkdir('node_modules', { recursive: true });
             await wc.mount(cached.snapshot, { mountPoint: 'node_modules' });
-            if (!userLockfile && cached.lockfile) await wc.fs.writeFile('package-lock.json', cached.lockfile);
+            if (!userLockfile && cached.lockfile) await wc.fs.writeFile(pm.lockfile, cached.lockfile);
             // Snapshots don't keep executable bits: mark package binaries (vite, next…) executable again
             const fixBins = await wc.spawn('node', ['-e', RESTORE_BIN_MODES]);
             processes.current.add(fixBins);
@@ -326,8 +331,8 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       }
 
       setState(s => ({ ...s, status: 'installing' }));
-      output.append(line(C.cyan, '$ npm install'));
-      const install = await wc.spawn('npm', ['install']);
+      output.append(line(C.cyan, `$ ${pm.name} install`));
+      const install = await wc.spawn(pm.name, ['install']);
       processes.current.add(install);
       // A slow or blocked network can leave npm silent for a long time: say so, and give up eventually
       let stalledOut = false;
@@ -351,12 +356,12 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       if (!isCurrent()) return;
       if (stalledOut) {
         installedFor.current = null;
-        return fail(`npm install made no progress for ${INSTALL_FAIL_MS / 60000} minutes, so it was stopped. Check your connection, then try again.`);
+        return fail(`${pm.name} install made no progress for ${INSTALL_FAIL_MS / 60000} minutes, so it was stopped. Check your connection, then try again.`);
       }
       setState(s => (s.stalled ? { ...s, stalled: false } : s));
       if (code !== 0) {
         installedFor.current = null;
-        return fail(`npm install failed (exit code ${code}). See the output above.`);
+        return fail(`${pm.name} install failed (exit code ${code}). See the output above.`);
       }
       installedFor.current = pkgText;
 
@@ -364,7 +369,7 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       if (depsKey && !restored) {
         (async () => {
           const snapshot = await wc.export('node_modules', { format: 'binary' });
-          const lockfile = await wc.fs.readFile('package-lock.json', 'utf-8').catch(() => null);
+          const lockfile = await wc.fs.readFile(pm.lockfile, 'utf-8').catch(() => null);
           await saveSnapshot(depsKey, snapshot, { lockfile, label: pkg.name || '' });
           if (isCurrent()) output.append(line(C.dim, `Saved the installed dependencies for next time (${mb(snapshot.byteLength)}).`));
         })().catch(e => {
@@ -373,8 +378,8 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       }
 
       setState(s => ({ ...s, status: 'starting' }));
-      output.append(line(C.cyan, `$ npm run ${script}`));
-      const dev = await wc.spawn('npm', ['run', script]);
+      output.append(line(C.cyan, `$ ${pm.name} run ${script}`));
+      const dev = await wc.spawn(pm.name, ['run', script]);
       processes.current.add(dev);
       pipe(dev, isCurrent);
       loadTypes(); // alongside the dev server starting

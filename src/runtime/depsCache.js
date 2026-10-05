@@ -9,17 +9,21 @@ export const MAX_BYTES = 600 * 1024 * 1024;
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides', 'resolutions'];
 
 /** Stable text of everything that decides what `npm install` produces (key order doesn't matter). */
-export function dependencySignature(pkg, lockfileText = null) {
+// npm, pnpm and yarn lay node_modules out differently, so the package manager is part of the key
+// (left out for npm, so keys saved before pnpm/yarn support stay valid)
+export function dependencySignature(pkg, lockfileText = null, packageManager = 'npm') {
   const sorted = (obj) => (obj && typeof obj === 'object' && !Array.isArray(obj)
     ? Object.fromEntries(Object.keys(obj).sort().map(k => [k, sorted(obj[k])]))
     : obj);
   const picked = {};
   for (const field of DEPENDENCY_FIELDS) if (pkg?.[field]) picked[field] = sorted(pkg[field]);
-  return JSON.stringify({ deps: picked, lock: lockfileText || null });
+  const signature = { deps: picked, lock: lockfileText || null };
+  if (packageManager && packageManager !== 'npm') signature.pm = packageManager;
+  return JSON.stringify(signature);
 }
 
-export async function dependencyKey(pkg, lockfileText) {
-  const bytes = new TextEncoder().encode(dependencySignature(pkg, lockfileText));
+export async function dependencyKey(pkg, lockfileText, packageManager) {
+  const bytes = new TextEncoder().encode(dependencySignature(pkg, lockfileText, packageManager));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
