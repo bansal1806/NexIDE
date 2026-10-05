@@ -22,7 +22,7 @@ const MAX_REPO_BYTES = 30 * 1024 * 1024;
 const PROJECT_ENTRY = {
   next: 'app/page.jsx', 'next-ts': 'app/page.tsx', react: 'src/App.jsx', 'react-ts': 'src/App.tsx',
   vue: 'src/App.vue', svelte: 'src/App.svelte', astro: 'src/pages/index.astro',
-  sveltekit: 'src/routes/+page.svelte', nuxt: 'app.vue', express: 'server.js',
+  sveltekit: 'src/routes/+page.svelte', 'react-router': 'app/routes/home.jsx', nuxt: 'app.vue', express: 'server.js',
 };
 
 let tabIdCounter = 1;

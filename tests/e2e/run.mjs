@@ -725,6 +725,26 @@ try {
       await run(); // Stop
     }
 
+    // React Router v7 (framework mode): loader, action (form post), resource route
+    {
+      const rr = await startProject('react-router');
+      const rrPage = await waitPreview(/Hello from React Router[\s\S]*Loaded on the server at/, 120000);
+      let posted = false;
+      const src = await page.getAttribute('#project-preview-frame', 'src').catch(() => null);
+      const frame = src && page.frames().find(f => f.url().startsWith(new URL(src).origin));
+      if (frame) {
+        await frame.fill('input[name="note"]', 'Posted by the e2e suite').catch(() => {});
+        await frame.click('button[type="submit"]').catch(() => {});
+        posted = (await waitPreview(/Posted by the e2e suite/, 30000)).ok;
+      }
+      await page.fill('#project-preview-path', '/api/hello');
+      await page.press('#project-preview-path', 'Enter');
+      const rrApi = await waitPreview(/Hello from a React Router resource route/, 90000);
+      check('Project: React Router runs its loader, action (form post) and resource route',
+        rr.ready && rrPage.ok && posted && rrApi.ok, `${rr.secs}s · page=${rrPage.ok} action=${posted} api=${rrApi.ok}`);
+      await run(); // Stop
+    }
+
     // A GitHub repo runs as a project: its text files are downloaded, then installed and started.
     // GitHub itself is mocked (no rate limits, deterministic); everything after the download is real.
     {
