@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   toFileSystemTree, parsePackageJson, pickDevScript, compatibilityWarnings, OutputLog,
-  shouldSyncPath, normalizeWatchPath, removedPaths, MAX_SYNC_BYTES,
+  shouldSyncPath, normalizeWatchPath, removedPaths, MAX_SYNC_BYTES, createStallWatch, isProgressChunk,
 } from '../runtime/project';
 import { isBinaryName } from '../utils/files';
 import { dependencyKey, loadSnapshot, saveSnapshot } from '../runtime/depsCache';
@@ -30,6 +30,10 @@ export function projectRuntimeUnsupportedReason() {
 
 const C = { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', reset: '\x1b[0m' };
 const line = (color, text) => `${color}${text}${C.reset}\r\n`;
+// npm install with no output: hint after a minute, stop after fifteen (a big tree like Nuxt's can
+// legitimately print nothing but the spinner for 7+ minutes on a slow network)
+const INSTALL_WARN_MS = 60 * 1000;
+const INSTALL_FAIL_MS = 15 * 60 * 1000;
 const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
 // Runs with Node in the runtime after restoring node_modules: every .bin entry's target → 0755
@@ -221,9 +225,13 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
     });
   }, [stopWatching, flushWatch]);
 
-  const pipe = useCallback((process, isCurrent) => {
+  const pipe = useCallback((process, isCurrent, onChunk) => {
     process.output.pipeTo(new WritableStream({
-      write(chunk) { if (isCurrent()) output.append(chunk); },
+      write(chunk) {
+        if (!isCurrent()) return;
+        output.append(chunk);
+        onChunk?.(chunk);
+      },
     })).catch(() => { /* stream closed when the process is killed */ });
   }, [output]);
 
@@ -321,10 +329,31 @@ export function useProject({ onFilesChanged, onTypes } = {}) {
       output.append(line(C.cyan, '$ npm install'));
       const install = await wc.spawn('npm', ['install']);
       processes.current.add(install);
-      pipe(install, isCurrent);
+      // A slow or blocked network can leave npm silent for a long time: say so, and give up eventually
+      let stalledOut = false;
+      const watch = createStallWatch({
+        warnAfter: INSTALL_WARN_MS,
+        failAfter: INSTALL_FAIL_MS,
+        onWarn: () => {
+          output.append(line(C.yellow, '⏳ npm hasn’t made progress for a minute. A slow or blocked network (VPN, firewall, ad blocker) can do this; it may still finish.'));
+          setState(s => ({ ...s, stalled: true }));
+        },
+        onRecover: () => setState(s => ({ ...s, stalled: false })),
+        onFail: () => {
+          stalledOut = true;
+          try { install.kill(); } catch { /* already exited */ }
+        },
+      });
+      pipe(install, isCurrent, (chunk) => { if (isProgressChunk(chunk)) watch.activity(); }); // spinner frames don't count
       const code = await install.exit;
+      watch.stop();
       processes.current.delete(install);
       if (!isCurrent()) return;
+      if (stalledOut) {
+        installedFor.current = null;
+        return fail(`npm install made no progress for ${INSTALL_FAIL_MS / 60000} minutes, so it was stopped. Check your connection, then try again.`);
+      }
+      setState(s => (s.stalled ? { ...s, stalled: false } : s));
       if (code !== 0) {
         installedFor.current = null;
         return fail(`npm install failed (exit code ${code}). See the output above.`);

@@ -9,7 +9,7 @@ const STEPS = [
 ];
 
 /** Preview of a running project's dev server (served from the in-browser runtime). */
-export default function ProjectPreview({ status, url, error, onStart, download = false }) {
+export default function ProjectPreview({ status, url, error, onStart, download = false, stalled = false }) {
   const [path, setPath] = useState('/');
   const [draft, setDraft] = useState('/');
   const [reloadKey, setReloadKey] = useState(0);
@@ -79,7 +79,14 @@ export default function ProjectPreview({ status, url, error, onStart, download =
               </li>
             ))}
           </ol>
-          <p className="project-preview-text">The first install takes a little while. Follow along in the terminal.</p>
+          {stalled ? (
+            <p className="project-preview-text" id="project-install-stalled">
+              This is taking longer than usual: npm hasn’t made progress for a minute. A slow or blocked network
+              (VPN, firewall, ad blocker) can cause it. It may still finish, or press Stop, then Start, to retry.
+            </p>
+          ) : (
+            <p className="project-preview-text">The first install takes a little while. Follow along in the terminal.</p>
+          )}
         </>
       ) : (
         <>

@@ -483,7 +483,7 @@ export default function App() {
             onSelect={setRightPanel}
             onClose={() => setRightPanel(null)}
             preview={{ code: activeTab?.content || '', language: activeTab?.lang || 'plaintext', onConsoleMessage: addConsoleMessage }}
-            projectPreview={projectActive ? { status: project.status, url: project.url, error: project.error, onStart: startProject, download: githubMode } : null}
+            projectPreview={projectActive ? { status: project.status, url: project.url, error: project.error, onStart: startProject, download: githubMode, stalled: project.stalled } : null}
             ai={{
               gemini,
               editorCode: activeTab?.content || '',
