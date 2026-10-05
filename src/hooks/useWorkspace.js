@@ -5,6 +5,7 @@ import { fetchFileContent, fetchRepoFiles } from '../services/github';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud, deleteFileFromCloud } from '../services/db';
 import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath, isBinaryName, withFileChanges } from '../utils/files';
 import { shouldSyncPath, MAX_SYNC_BYTES } from '../runtime/project';
+import { baselineFromTree, computeGitChanges } from '../utils/gitChanges';
 import { STARTERS } from '../components/starters';
 import { PROJECT_TEMPLATES, templateFiles } from '../projects/templates';
 
@@ -80,6 +81,8 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
   const [githubMode, setGithubMode] = useState(false);
   const [githubInfo, setGithubInfo] = useState(null);
   const [githubTree, setGithubTree] = useState([]); // also holds cloud / starter project trees
+  // GitHub: each file's blob SHA when the repo was loaded (what "changed" is measured against)
+  const [githubBaseline, setGithubBaseline] = useState(() => new Map());
   // Starter project (in-memory files, run in the browser's Node.js runtime): { id, label } | null
   const [starterProject, setStarterProject] = useState(null);
 
@@ -211,8 +214,9 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
         const node = findNodeByPath(githubTree, tab.path);
         if (node) node._content = tab.content;
       } else if (githubMode) {
-        if (!silent) notify('info', 'GitHub files are read-only here. Copy your changes or open the repo as a local folder.');
-        return false;
+        // Kept in NexIDE until committed (Source Control)
+        setGithubTree(tree => withFileChanges(tree, [{ type: 'write', path: tab.path, content: tab.content }]));
+        if (!silent) notify('info', `Saved ${tab.name} in NexIDE. It reaches GitHub when you commit it.`);
       } else if (tab.handle?.fallback) {
         await fs.writeFile(tab.handle, tab.content);
         if (!silent) notify('info', 'Saved in memory only — this browser cannot write to disk. Use Chrome/Edge to save files.');
@@ -318,8 +322,9 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     setCloudMode(false);
     setStarterProject(null);
     setActiveProjectId(null);
-    setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch });
+    setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch, commitSha: info.commitSha ?? null });
     setGithubTree(info.tree);
+    setGithubBaseline(baselineFromTree(info.tree));
     setWorkspaceFiles([]);
     resetWorkspace();
     callbacks.current.onRevealSidebar();
@@ -485,6 +490,11 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     else if (deletedOpen.length) notify('info', `The project deleted ${deletedOpen.join(', ')}. Save to keep it.`);
   }, [starterProject, cloudMode, activeProjectId, githubMode, fs, notify, refreshCloudTree]);
 
+  /** GitHub workspaces: saved changes since the repo was loaded (modified / added / deleted). */
+  const listGitChanges = useCallback(
+    () => (githubMode ? computeGitChanges(githubTree, githubBaseline) : Promise.resolve([])),
+    [githubMode, githubTree, githubBaseline]);
+
   const handleRefreshTree = useCallback(() => {
     if (cloudMode && activeProjectId) {
       refreshCloudTree(activeProjectId).catch(e => notify('error', e.message));
@@ -528,7 +538,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     cloudMode, githubMode, githubInfo, activeProjectId, visibleCloudProjects, starterProject,
     tabs, setTabs, setActiveTabId, tabsRef, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
-    buildRunFiles, projectFiles, newProjectFromTemplate, applyRuntimeChanges,
+    buildRunFiles, projectFiles, newProjectFromTemplate, applyRuntimeChanges, listGitChanges,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   };

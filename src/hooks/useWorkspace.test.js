@@ -240,3 +240,32 @@ describe('useWorkspace — running a GitHub repo as a project', () => {
     expect(fetchRepoFiles).not.toHaveBeenCalled();
   });
 });
+
+describe('useWorkspace — changes to a GitHub repo', () => {
+  const HELLO = 'ce013625030ba8dba906f756967f9e9ca394464a'; // git blob id of "hello\n"
+  const node = (path) => ({ name: path.split('/').pop(), path, kind: 'file', handle: null, githubItem: { path, sha: HELLO, size: 6 }, _content: 'hello\n', children: [] });
+  const load = (result) => act(() => result.current.handleGitHubLoad({ owner: 'me', repo: 'app', branch: 'main', tree: [node('a.js'), node('b.js')], truncated: false }));
+
+  it('saving keeps the change in NexIDE, and it shows up as modified', async () => {
+    const { result, opts } = setup();
+    load(result);
+    expect(await result.current.listGitChanges()).toEqual([]);
+
+    await act(() => result.current.openFileInTab({ path: 'a.js' }));
+    act(() => result.current.handleEditorChange('hello world\n'));
+    await act(() => result.current.saveFile());
+    expect(opts.notify).toHaveBeenCalledWith('info', expect.stringMatching(/Saved a\.js in NexIDE/));
+    expect(result.current.activeTab.dirty).toBe(false);
+    expect(await result.current.listGitChanges()).toEqual([{ path: 'a.js', status: 'modified', content: 'hello world\n' }]);
+  });
+
+  it('files the project creates or deletes count as added / deleted', async () => {
+    const { result } = setup();
+    load(result);
+    await act(() => result.current.applyRuntimeChanges([
+      { type: 'write', path: 'package-lock.json', content: '{}' },
+      { type: 'delete', path: 'b.js' },
+    ]));
+    expect((await result.current.listGitChanges()).map(c => `${c.status} ${c.path}`)).toEqual(['deleted b.js', 'added package-lock.json']);
+  });
+});
