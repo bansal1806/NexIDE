@@ -610,6 +610,169 @@ import Layout from '../layouts/Layout.astro';
 `,
 };
 
+const SVELTEKIT = {
+  'package.json': json({
+    name: 'my-sveltekit-app',
+    private: true,
+    type: 'module',
+    scripts: { dev: 'vite dev', build: 'vite build', preview: 'vite preview' },
+    devDependencies: {
+      '@sveltejs/adapter-auto': '^6.0.0',
+      '@sveltejs/kit': '^2.20.0',
+      '@sveltejs/vite-plugin-svelte': '^5.0.0',
+      svelte: '^5.0.0',
+      vite: '^6.3.0',
+    },
+  }),
+  'svelte.config.js': `import adapter from '@sveltejs/adapter-auto';
+
+export default {
+  kit: { adapter: adapter() },
+};
+`,
+  'vite.config.js': `import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [sveltekit()],
+});
+`,
+  'src/app.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>
+`,
+  'src/routes/+layout.svelte': `<script>
+  import '../app.css';
+  let { children } = $props();
+</script>
+
+{@render children()}
+`,
+  'src/routes/+page.server.js': `// Runs on the (in-browser) Node.js server for every request
+export function load() {
+  return { renderedAt: new Date().toLocaleTimeString() };
+}
+`,
+  'src/routes/+page.svelte': `<script>
+  let { data } = $props();
+  let count = $state(0);
+</script>
+
+<main>
+  <h1>Hello from SvelteKit</h1>
+  <p>Edit <code>src/routes/+page.svelte</code> — changes appear instantly.</p>
+  <p class="muted">Loaded on the server at {data.renderedAt}</p>
+  <button onclick={() => count++}>Clicked {count} {count === 1 ? 'time' : 'times'}</button>
+  <p>API route: <a href="/api/hello">/api/hello</a></p>
+</main>
+`,
+  'src/routes/api/hello/+server.js': `import { json } from '@sveltejs/kit';
+
+export function GET() {
+  return json({ message: 'Hello from a SvelteKit endpoint', time: Date.now() });
+}
+`,
+  'src/app.css': `body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #1b1726;
+  color: #f7f3ff;
+}
+
+main {
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 24px;
+}
+
+a { color: #8fd8ff; }
+.muted { color: #cfc6e6; }
+
+button {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: 2px solid #0d0b13;
+  border-radius: 999px;
+  background: #ffb98f;
+  color: #0d0b13;
+  cursor: pointer;
+}
+`,
+};
+
+const NUXT = {
+  'package.json': json({
+    name: 'my-nuxt-app',
+    private: true,
+    type: 'module',
+    scripts: { dev: 'nuxt dev', build: 'nuxt build', postinstall: 'nuxt prepare' },
+    dependencies: { nuxt: '^3.17.0', vue: '^3.5.0' },
+  }),
+  'nuxt.config.ts': `export default defineNuxtConfig({
+  compatibilityDate: '2025-07-15',
+  devtools: { enabled: false },
+  css: ['~/assets/main.css'],
+});
+`,
+  'app.vue': `<script setup>
+// useFetch runs on the server first, then hydrates in the browser
+const { data } = await useFetch('/api/hello');
+const count = ref(0);
+</script>
+
+<template>
+  <main>
+    <h1>Hello from Nuxt</h1>
+    <p>Edit <code>app.vue</code> — changes appear instantly (hot reload).</p>
+    <p class="muted">From the server: {{ data?.message }}</p>
+    <button @click="count++">Clicked {{ count }} {{ count === 1 ? 'time' : 'times' }}</button>
+    <p>API route: <a href="/api/hello">/api/hello</a></p>
+  </main>
+</template>
+`,
+  'server/api/hello.ts': `export default defineEventHandler(() => ({
+  message: 'Hello from a Nuxt server route',
+  time: Date.now(),
+}));
+`,
+  'assets/main.css': `body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #1b1726;
+  color: #f7f3ff;
+}
+
+main {
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 24px;
+}
+
+a { color: #8fd8ff; }
+.muted { color: #cfc6e6; }
+
+button {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: 2px solid #0d0b13;
+  border-radius: 999px;
+  background: #7df2c6;
+  color: #0d0b13;
+  cursor: pointer;
+}
+`,
+};
+
 const EXPRESS = {
   'package.json': json({
     name: 'my-express-api',
@@ -655,6 +818,8 @@ export const PROJECT_TEMPLATES = [
   { id: 'vue',     emoji: '💚', label: 'Vue + Vite',   blurb: 'single-file components', tone: 'mint',  files: VUE },
   { id: 'svelte',  emoji: '🔥', label: 'Svelte + Vite', blurb: 'runes, hot reload',     tone: 'peach', files: SVELTE },
   { id: 'astro',   emoji: '🚀', label: 'Astro',        blurb: 'content sites, routes',  tone: 'sky',   files: ASTRO },
+  { id: 'sveltekit', emoji: '🧡', label: 'SvelteKit',  blurb: 'full-stack Svelte',       tone: 'peach', files: SVELTEKIT },
+  { id: 'nuxt',    emoji: '💚', label: 'Nuxt',         blurb: 'full-stack Vue · big first install', tone: 'mint',  files: NUXT },
   { id: 'express', emoji: '🚂', label: 'Express API',  blurb: 'a real Node.js server',  tone: 'peach', files: EXPRESS },
 ];
 
