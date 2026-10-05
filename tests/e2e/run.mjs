@@ -712,6 +712,19 @@ try {
     check('Project: Next.js picks up edits', edited.ok, JSON.stringify(edited.text.slice(0, 60)));
     await run(); // Stop
 
+    // SvelteKit: server load() and an API endpoint
+    {
+      const kit = await startProject('sveltekit');
+      const kitPage = await waitPreview(/Hello from SvelteKit[\s\S]*Loaded on the server at/, 120000);
+      await page.fill('#project-preview-path', '/api/hello');
+      await page.press('#project-preview-path', 'Enter');
+      const kitApi = await waitPreview(/Hello from a SvelteKit endpoint/, 90000);
+      check('Project: SvelteKit renders server-loaded data and serves an API route',
+        kit.ready && kitPage.ok && kitApi.ok,
+        `${kit.secs}s · page=${kitPage.ok} api=${kitApi.ok}${kitPage.ok ? '' : ` · output: ${(await terminalText('#project-output')).replace(/\s+/g, ' ').slice(-200)}`}`);
+      await run(); // Stop
+    }
+
     // A GitHub repo runs as a project: its text files are downloaded, then installed and started.
     // GitHub itself is mocked (no rate limits, deterministic); everything after the download is real.
     {
