@@ -784,6 +784,38 @@ try {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
     }
 
+    // A pnpm project (packageManager field): installs and runs with pnpm (GitHub mocked, as above)
+    {
+      const repoFiles = {
+        'package.json': JSON.stringify({ name: 'pnpm-demo', private: true, type: 'module', packageManager: 'pnpm@8.15.6', scripts: { dev: 'vite' }, devDependencies: { vite: '^6.3.0' } }),
+        'index.html': '<!doctype html><html><body><h1>Hello from a pnpm project</h1></body></html>',
+      };
+      const tree = Object.entries(repoFiles).map(([path, content]) => ({ path, type: 'blob', size: content.length }));
+      await page.route('https://api.github.com/repos/e2e/pnpm-demo', r => r.fulfill({ json: { default_branch: 'main' } }));
+      await page.route('https://api.github.com/repos/e2e/pnpm-demo/git/trees/**', r => r.fulfill({ json: { tree, truncated: false } }));
+      await page.route('https://raw.githubusercontent.com/e2e/pnpm-demo/main/**', r => {
+        const path = new URL(r.request().url()).pathname.split('/main/')[1];
+        return repoFiles[path] !== undefined ? r.fulfill({ body: repoFiles[path], contentType: 'text/plain' }) : r.fulfill({ status: 404 });
+      });
+      await page.goto(BASE);
+      await page.click('#welcome-btn-open-github');
+      await page.fill('#github-repo-input', 'e2e/pnpm-demo');
+      await page.click('#btn-load-github-repo');
+      await page.waitForSelector('#github-modal', { state: 'detached', timeout: 15000 });
+      await page.waitForFunction(() => document.querySelector('#btn-run-code')?.textContent.trim() === 'Start', null, { timeout: 15000 });
+      const started = Date.now();
+      await run();
+      const ready = await page.waitForFunction(() => document.querySelector('#project-status')?.textContent === 'Running', null, { timeout: 300000 }).then(() => true, () => false);
+      const badge = (await page.textContent('#project-package-manager').catch(() => '')).trim();
+      const rendered = await waitPreview(/Hello from a pnpm project/, 60000);
+      const lockfile = await page.waitForFunction(() => [...document.querySelectorAll('#sidebar .file-tree-name')].some(e => e.textContent.trim() === 'pnpm-lock.yaml'), null, { timeout: 30000 }).then(() => true, () => false);
+      check('Project: a pnpm project installs and runs with pnpm',
+        ready && badge === 'pnpm' && rendered.ok && lockfile,
+        `${Math.round((Date.now() - started) / 1000)}s · badge=${badge} lockfile=${lockfile} rendered=${rendered.ok}`);
+      await run(); // Stop
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    }
+
     // TypeScript project: the installed packages' types power editor diagnostics and completions
     const tsDiagnostics = (path) => page.evaluate(async (path) => {
       const ts = window.monaco.typescript ?? window.monaco.languages.typescript;

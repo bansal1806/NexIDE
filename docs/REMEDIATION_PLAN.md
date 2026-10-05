@@ -313,14 +313,17 @@ Production E2E after merge: 60/60 (dependency cache live: 29s → 7s).
 Decisions: order starter → pnpm → GitHub · GitHub auth: Settings token first, OAuth later · default when
 committing to main: new branch + PR · include "Publish to GitHub".
 
-### 16.1 React Router v7 starter (Remix's successor)
-- [ ] Framework mode: loader, action (form), resource route; verified in the runtime; e2e check.
+### 16.1 React Router v7 starter (Remix's successor) ✅
+- [x] Framework mode: loader, action (form), resource route; verified in the runtime; e2e check.
 
-### 16.2 pnpm / yarn
-- [ ] P1 Spike: pnpm and yarn 1 in the runtime; node_modules snapshots keep pnpm's symlinks; bin modes.
-- [ ] P2 Detect (packageManager field → lockfile → npm), install/run commands, status chip, Settings override.
-- [ ] P3 Snapshot + type collection for pnpm's layout (follow real paths for transitive deps); e2e with a
-  pnpm repo. Yarn 2+ (PnP) out of scope: say so, fall back to npm.
+### 16.2 pnpm / yarn ✅ (branch `pnpm-support`)
+- [x] P1 Spike: the runtime ships npm 10.8, pnpm 8.15 and yarn 1.22; pnpm and yarn install and run dev servers;
+  node_modules snapshots keep pnpm's symlinks; after a restore, pnpm's dev server fails with EACCES exactly
+  like npm's did, and the existing executable-bit fix covers it.
+- [x] P2 Detect (packageManager field → lockfile → npm; Yarn 2+ falls back to npm with a warning), install/run
+  with it, its lockfile and cache key (npm keys unchanged), Settings → Package manager, terminal badge.
+- [x] P3 Type collection follows pnpm's layout (transitive deps next to each package's real path).
+- Verification: lint clean · unit 156/156 · E2E 80/80 (a pnpm repo installs in 17 s, pnpm badge, pnpm-lock.yaml).
 
 ### 16.3 Push to GitHub
 - [ ] G1 Change tracking against the loaded tree (blob SHAs): modified / added / deleted.
