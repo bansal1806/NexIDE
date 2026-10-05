@@ -30,9 +30,10 @@ export function projectRuntimeUnsupportedReason() {
 
 const C = { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', reset: '\x1b[0m' };
 const line = (color, text) => `${color}${text}${C.reset}\r\n`;
-// npm install with no output: hint after a minute, stop after ten
+// npm install with no output: hint after a minute, stop after fifteen (a big tree like Nuxt's can
+// legitimately print nothing but the spinner for 7+ minutes on a slow network)
 const INSTALL_WARN_MS = 60 * 1000;
-const INSTALL_FAIL_MS = 10 * 60 * 1000;
+const INSTALL_FAIL_MS = 15 * 60 * 1000;
 const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
 // Runs with Node in the runtime after restoring node_modules: every .bin entry's target → 0755
