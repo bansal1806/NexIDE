@@ -44,6 +44,8 @@ page.on('console', m => {
   // The expired-link check answers Supabase's verify with a mocked 403 on purpose; browsers log any
   // failed response, even when the app handles it (it shows "expired or was already used")
   if (/\/auth\/v1\/verify/.test(m.location()?.url || '') && /status of 403/.test(m.text())) return;
+  // Likewise the "branch moved" check answers GitHub's ref update with a mocked 422 (the app explains it)
+  if (/\/repos\/e2e\/push\/git\/refs\/heads\//.test(m.location()?.url || '') && /status of 422/.test(m.text())) return;
   const where = m.location()?.url;
   pageErrors.push(`console: ${m.text()}${where ? ` (${where})` : ''}`);
 });
@@ -761,6 +763,8 @@ try {
       ];
       const rawRequests = [];
       await page.route('https://api.github.com/repos/e2e/demo', r => r.fulfill({ json: { default_branch: 'main' } }));
+      // Loading pins the branch to a commit first (commits/<branch> → its tree)
+      await page.route('https://api.github.com/repos/e2e/demo/commits/**', r => r.fulfill({ json: { sha: 'c-demo', commit: { tree: { sha: 't-demo' } } } }));
       await page.route('https://api.github.com/repos/e2e/demo/git/trees/**', r => r.fulfill({ json: { tree, truncated: false } }));
       await page.route('https://raw.githubusercontent.com/e2e/demo/main/**', r => {
         const path = new URL(r.request().url()).pathname.split('/main/')[1];
@@ -792,6 +796,8 @@ try {
       };
       const tree = Object.entries(repoFiles).map(([path, content]) => ({ path, type: 'blob', size: content.length }));
       await page.route('https://api.github.com/repos/e2e/pnpm-demo', r => r.fulfill({ json: { default_branch: 'main' } }));
+      // Loading pins the branch to a commit first (commits/<branch> → its tree)
+      await page.route('https://api.github.com/repos/e2e/pnpm-demo/commits/**', r => r.fulfill({ json: { sha: 'c-pnpm-demo', commit: { tree: { sha: 't-pnpm-demo' } } } }));
       await page.route('https://api.github.com/repos/e2e/pnpm-demo/git/trees/**', r => r.fulfill({ json: { tree, truncated: false } }));
       await page.route('https://raw.githubusercontent.com/e2e/pnpm-demo/main/**', r => {
         const path = new URL(r.request().url()).pathname.split('/main/')[1];
@@ -939,6 +945,169 @@ try {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await page.goto(BASE);
     }
+  }
+
+  // ── Push to GitHub: change tracking, diff, commit to a new branch + PR, and a branch that moved ──
+  // GitHub is mocked (records every request); nothing touches a real repository.
+  {
+    const HELLO_SHA = 'ce013625030ba8dba906f756967f9e9ca394464a'; // git blob id of "hello\n"
+    const calls = [];
+    let patchStatus = 200;
+    let commitCount = 0;
+    const json = (r, body, status = 200) => r.fulfill({ status, json: body });
+    await page.route('https://api.github.com/repos/e2e/push**', async r => {
+      const req = r.request();
+      const url = new URL(req.url());
+      const path = url.pathname.replace('/repos/e2e/push', '') || '/';
+      const method = req.method();
+      const body = req.postData() ? JSON.parse(req.postData()) : undefined;
+      calls.push({ method, path, body, auth: (await req.allHeaders()).authorization });
+      if (method === 'GET' && path === '/') return json(r, { default_branch: 'main' });
+      if (method === 'GET' && path === '/commits/main') return json(r, { sha: 'c-push', commit: { tree: { sha: 't-push' } } });
+      if (method === 'GET' && path.startsWith('/git/trees/')) {
+        return json(r, { truncated: false, tree: [
+          { path: 'a.js', type: 'blob', sha: HELLO_SHA, mode: '100644', size: 6 },
+          { path: 'README.md', type: 'blob', sha: HELLO_SHA, mode: '100644', size: 6 },
+        ] });
+      }
+      if (method === 'GET' && path.startsWith('/contents/')) return json(r, { encoding: 'base64', content: Buffer.from('hello\n').toString('base64') });
+      if (method === 'GET' && path.startsWith('/git/commits/')) return json(r, { tree: { sha: `tree-of-${path.split('/').pop()}` } });
+      if (method === 'POST' && path === '/git/blobs') return json(r, { sha: 'blob-1' }, 201);
+      if (method === 'POST' && path === '/git/trees') return json(r, { sha: 'tree-2' }, 201);
+      if (method === 'POST' && path === '/git/commits') return json(r, { sha: `commit-${++commitCount}` }, 201);
+      if (method === 'POST' && path === '/git/refs') return json(r, { ref: body.ref }, 201);
+      if (method === 'POST' && path === '/pulls') return json(r, { html_url: `https://github.com/e2e/push/pull/${commitCount}` }, 201);
+      if (method === 'PATCH' && path.startsWith('/git/refs/heads/')) return json(r, { message: 'Update is not a fast forward' }, patchStatus);
+      return json(r, { message: 'not mocked' }, 404);
+    });
+
+    // A token (fine-grained, Contents: write) in Settings
+    await page.goto(BASE);
+    await page.click('#btn-topbar-settings');
+    await page.fill('#settings-github-token', 'github_pat_e2e_token');
+    await page.click('#btn-save-settings');
+    await page.waitForSelector('#settings-modal', { state: 'detached' });
+    // The token is encrypted and stored asynchronously (later steps reload the page)
+    await page.waitForFunction(() => /"ct"/.test(localStorage.getItem('nexide:secrets') || ''), null, { timeout: 10000 });
+
+    await page.click('#welcome-btn-open-github');
+    await page.fill('#github-repo-input', 'e2e/push');
+    await page.click('#btn-load-github-repo');
+    await page.waitForSelector('#github-modal', { state: 'detached', timeout: 15000 });
+
+    // Edit and save a.js
+    await page.click('#sidebar .file-tree-item:has-text("a.js")');
+    await editorReady();
+    await page.waitForTimeout(500);
+    await setCode('hello from NexIDE\n');
+    await page.keyboard.press('Control+s');
+    await page.click('#btn-activity-git');
+    const listed = await page.waitForSelector('.scm-change[data-path="a.js"] .scm-badge.modified', { timeout: 15000 }).then(() => true, () => false);
+    const onlyOne = (await page.$$('.scm-change')).length === 1;
+    await page.click('.scm-change[data-path="a.js"] .scm-change-main');
+    const diff = await page.waitForSelector('.scm-diff .monaco-diff-editor', { timeout: 20000 }).then(() => true, () => false);
+    check('GitHub: a saved edit shows up as modified, with a diff against the loaded commit',
+      listed && onlyOne && diff, `listed=${listed} onlyOne=${onlyOne} diff=${diff}` +
+      (onlyOne ? '' : ` · listed: ${(await page.$$eval('.scm-change', els => els.map(e => `${e.querySelector('.scm-badge')?.textContent} ${e.dataset.path}`))).join(', ')}`));
+
+    // Commit on main → the default is a new branch + pull request
+    const prDefault = await page.isChecked('#scm-target-pr');
+    await page.fill('#scm-message', 'Greet from NexIDE');
+    await page.click('#btn-scm-commit');
+    const prLink = await page.waitForSelector('#scm-pr-link', { timeout: 15000 }).then(el => el.getAttribute('href'), () => null);
+    const writes = calls.filter(c => c.method !== 'GET');
+    const tree = writes.find(c => c.path === '/git/trees')?.body;
+    const commit = writes.find(c => c.path === '/git/commits')?.body;
+    const ref = writes.find(c => c.path === '/git/refs')?.body;
+    const pull = writes.find(c => c.path === '/pulls')?.body;
+    const sequence = writes.map(c => `${c.method} ${c.path}`).join(' → ');
+    const ok = prDefault && prLink === 'https://github.com/e2e/push/pull/1'
+      && sequence === 'POST /git/blobs → POST /git/trees → POST /git/commits → POST /git/refs → POST /pulls'
+      && tree?.base_tree === 'tree-of-c-push' && tree?.tree.length === 1 && tree.tree[0].path === 'a.js'
+      && commit?.parents?.[0] === 'c-push' && commit?.message === 'Greet from NexIDE'
+      && /^refs\/heads\/nexide\//.test(ref?.ref || '') && pull?.base === 'main'
+      && writes.every(c => c.auth === 'Bearer github_pat_e2e_token');
+    check('GitHub: commit goes to a new branch with a pull request (exact API sequence, parent = loaded commit)', ok,
+      ok ? '' : `prDefault=${prDefault} pr=${prLink} sequence=${sequence}`);
+    const clean = await page.waitForFunction(() => /No changes/.test(document.querySelector('#scm-panel')?.textContent || ''), null, { timeout: 10000 }).then(() => true, () => false);
+    check('GitHub: after committing, nothing shows as changed', clean);
+
+    // The branch moved on GitHub (someone pushed): no force push; offer a new branch + PR instead
+    await page.click('#sidebar .file-tree-item:has-text("README.md")');
+    await page.waitForTimeout(800);
+    await setCode('# changed again\n');
+    await page.keyboard.press('Control+s');
+    await page.waitForSelector('.scm-change[data-path="README.md"]', { timeout: 15000 });
+    await page.check('#scm-target-branch');
+    patchStatus = 422;
+    calls.length = 0;
+    await page.click('#btn-scm-commit');
+    const staleButton = await page.waitForSelector('#btn-scm-stale-pr', { timeout: 15000 }).then(() => true, () => false);
+    const staleText = await page.textContent('#scm-error').catch(() => '');
+    if (staleButton) await page.click('#btn-scm-stale-pr');
+    const recovered = await page.waitForSelector('#scm-pr-link', { timeout: 15000 }).then(() => true, () => false);
+    const patched = calls.filter(c => c.method === 'PATCH').map(c => c.body);
+    check('GitHub: a branch that moved is never overwritten; the changes go to a new branch + PR',
+      staleButton && /changed on GitHub/.test(staleText) && recovered && patched.every(b => b.force === false),
+      `stale=${staleButton} recovered=${recovered} patches=${JSON.stringify(patched)}`);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await page.goto(BASE);
+  }
+
+  // ── Publish to GitHub: a starter becomes a new repository, then a GitHub workspace (GitHub mocked) ──
+  {
+    const calls = [];
+    let published = false;
+    const json = (r, body, status = 200) => r.fulfill({ status, json: body });
+    await page.route('https://api.github.com/user/repos', async r => {
+      calls.push({ method: r.request().method(), path: '/user/repos', body: JSON.parse(r.request().postData() || '{}') });
+      return json(r, { full_name: 'e2e/react-vite', default_branch: 'main', html_url: 'https://github.com/e2e/react-vite' }, 201);
+    });
+    await page.route('https://api.github.com/repos/e2e/react-vite**', async r => {
+      const req = r.request();
+      const path = new URL(req.url()).pathname.replace('/repos/e2e/react-vite', '');
+      const method = req.method();
+      const body = req.postData() ? JSON.parse(req.postData()) : undefined;
+      calls.push({ method, path, body });
+      if (method === 'GET' && path === '/commits/main') {
+        return json(r, published ? { sha: 'c-pub', commit: { tree: { sha: 't-pub' } } } : { sha: 'c-init', commit: { tree: { sha: 't-init' } } });
+      }
+      if (method === 'GET' && path === '/git/commits/c-init') return json(r, { tree: { sha: 't-init' } });
+      if (method === 'POST' && path === '/git/blobs') return json(r, { sha: `blob-${calls.length}` }, 201);
+      if (method === 'POST' && path === '/git/trees') return json(r, { sha: 't-pub' }, 201);
+      if (method === 'POST' && path === '/git/commits') return json(r, { sha: 'c-pub' }, 201);
+      if (method === 'PATCH' && path === '/git/refs/heads/main') { published = true; return json(r, {}); }
+      if (method === 'GET' && path === '/git/trees/t-pub') {
+        return json(r, { truncated: false, tree: [{ path: 'package.json', type: 'blob', sha: 'x1', mode: '100644', size: 10 }, { path: 'src', type: 'tree', sha: 'x2' }, { path: 'src/App.jsx', type: 'blob', sha: 'x3', mode: '100644', size: 10 }] });
+      }
+      return json(r, { message: 'not mocked' }, 404);
+    });
+
+    await page.goto(BASE);
+    await page.click('#welcome-project-react');
+    await editorReady();
+    await page.click('#btn-activity-git');
+    await page.waitForSelector('#scm-publish', { timeout: 15000 });
+    const suggested = await page.inputValue('#scm-repo-name');
+    await page.click('#btn-scm-publish');
+    const link = await page.waitForSelector('#scm-publish-link', { timeout: 20000 }).then(el => el.getAttribute('href'), () => null);
+    const create = calls.find(c => c.path === '/user/repos')?.body;
+    const tree = calls.find(c => c.path === '/git/trees')?.body;
+    const paths = (tree?.tree || []).map(e => e.path).sort();
+    const parent = calls.find(c => c.method === 'POST' && c.path === '/git/commits')?.body?.parents?.[0];
+    const ok = suggested === 'react-vite' && link === 'https://github.com/e2e/react-vite'
+      && create?.auto_init === true && create?.private === true
+      && tree?.base_tree === 't-init' && paths.includes('package.json') && paths.includes('src/App.jsx') && paths.includes('vite.config.js')
+      && parent === 'c-init';
+    check('GitHub: publish creates a repo (with a first commit) and commits the project on top', ok,
+      ok ? `${paths.length} files` : `suggested=${suggested} link=${link} create=${JSON.stringify(create)} base=${tree?.base_tree} parent=${parent} paths=${paths.join(',')}`);
+
+    await page.click('#btn-scm-open-published');
+    const switched = await page.waitForFunction(() => /e2e\/react-vite/.test(document.querySelector('#sidebar')?.textContent || '')
+      && /No changes/.test(document.querySelector('#scm-panel')?.textContent || ''), null, { timeout: 20000 }).then(() => true, () => false);
+    check('GitHub: after publishing, the project continues as a GitHub workspace with nothing changed', switched);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await page.goto(BASE);
   }
 
   // ── Dialogs: focus moves in, Tab is trapped, Escape closes, focus returns to the opener ──
