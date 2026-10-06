@@ -35,10 +35,18 @@ export async function computeGitChanges(tree, baseline) {
     if (typeof node._content !== 'string') continue;
     const original = baseline.get(node.path);
     if (!original) changes.push({ path: node.path, status: 'added', content: node._content });
-    else if (await gitBlobSha(node._content) !== original) changes.push({ path: node.path, status: 'modified', content: node._content });
+    else if (await gitBlobSha(node._content) !== original) {
+      // Keep the file's mode (an executable script stays executable)
+      const mode = node.githubItem?.mode;
+      changes.push({ path: node.path, status: 'modified', content: node._content, ...(mode ? { mode } : {}) });
+    }
   }
   for (const path of baseline.keys()) {
     if (!present.has(path)) changes.push({ path, status: 'deleted' });
   }
   return changes.sort((a, b) => a.path.localeCompare(b.path));
 }
+
+/** A repository name from a project name: "My Cool App!" → "my-cool-app". */
+export const repoNameFrom = (name) => String(name || 'nexide-project').toLowerCase()
+  .replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 100) || 'nexide-project';

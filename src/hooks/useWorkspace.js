@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useFileSystem } from './useFileSystem';
 import { useMonacoWorkspace } from './useMonacoWorkspace';
-import { fetchFileContent, fetchRepoFiles } from '../services/github';
+import { fetchFileContent, fetchRepoFiles, fetchFileAt, commitChanges, publishRepository, fetchRepoTree } from '../services/github';
 import { fetchProjects, createProject, fetchProjectFiles, saveFileToCloud, deleteFileFromCloud } from '../services/db';
 import { getLang, findNodeByPath, flattenFiles, buildTreeFromPaths, normalizeRelativePath, isBinaryName, withFileChanges } from '../utils/files';
 import { shouldSyncPath, MAX_SYNC_BYTES } from '../runtime/project';
-import { baselineFromTree, computeGitChanges } from '../utils/gitChanges';
+import { baselineFromTree, computeGitChanges, gitBlobSha } from '../utils/gitChanges';
 import { STARTERS } from '../components/starters';
 import { PROJECT_TEMPLATES, templateFiles } from '../projects/templates';
 
@@ -322,7 +322,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     setCloudMode(false);
     setStarterProject(null);
     setActiveProjectId(null);
-    setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch, commitSha: info.commitSha ?? null });
+    setGithubInfo({ owner: info.owner, repo: info.repo, branch: info.branch, commitSha: info.commitSha ?? null, defaultBranch: info.defaultBranch ?? null });
     setGithubTree(info.tree);
     setGithubBaseline(baselineFromTree(info.tree));
     setWorkspaceFiles([]);
@@ -495,6 +495,55 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     () => (githubMode ? computeGitChanges(githubTree, githubBaseline) : Promise.resolve([])),
     [githubMode, githubTree, githubBaseline]);
 
+  /** A file's content in the commit the workspace is based on (diffs, discard). */
+  const gitOriginal = useCallback((path) => {
+    if (!githubInfo?.commitSha) return Promise.reject(new Error('This repository was opened without a commit to compare with.'));
+    return fetchFileAt(githubInfo.owner, githubInfo.repo, path, githubInfo.commitSha, githubToken);
+  }, [githubInfo, githubToken]);
+
+  /** Undo one change: restore the original content (or remove an added file). */
+  const discardGitChange = useCallback(async (change) => {
+    const restored = change.status === 'added' ? null : await gitOriginal(change.path);
+    setGithubTree(tree => withFileChanges(tree, [restored === null
+      ? { type: 'delete', path: change.path }
+      : { type: 'write', path: change.path, content: restored }]));
+    setTabs(prev => (restored === null
+      ? prev.filter(t => t.path !== change.path)
+      : prev.map(t => (t.path === change.path ? { ...t, content: restored, dirty: false } : t))));
+  }, [gitOriginal]);
+
+  /**
+   * Commit the saved changes to GitHub (on the current branch, or a new branch + pull request).
+   * Afterwards the workspace is based on the new commit (and branch), so nothing shows as changed.
+   */
+  const commitToGitHub = useCallback(async ({ message, newBranch = null, pullRequest = null }) => {
+    const changes = await computeGitChanges(githubTree, githubBaseline);
+    const result = await commitChanges({
+      owner: githubInfo.owner, repo: githubInfo.repo, token: githubToken, branch: githubInfo.branch,
+      baseCommitSha: githubInfo.commitSha, changes, message, newBranch, pullRequest,
+    });
+    const baseline = new Map(githubBaseline);
+    for (const change of changes) {
+      if (change.status === 'deleted') baseline.delete(change.path);
+      else baseline.set(change.path, await gitBlobSha(change.content));
+    }
+    setGithubBaseline(baseline);
+    setGithubInfo(info => ({ ...info, branch: result.branch, commitSha: result.commitSha }));
+    return { ...result, count: changes.length };
+  }, [githubTree, githubBaseline, githubInfo, githubToken]);
+
+  /** Publish this (non-GitHub) workspace's text files as a new repository. */
+  const publishToGitHub = useCallback(async ({ name, isPrivate }) => {
+    const files = await projectFiles();
+    return publishRepository({ token: githubToken, name, isPrivate, files, description: 'Made with NexIDE' });
+  }, [projectFiles, githubToken]);
+
+  /** Switch to a repository as a GitHub workspace (e.g. right after publishing it). */
+  const openGitHubRepo = useCallback(async ({ owner, repo, branch }) => {
+    const { tree, truncated, commitSha } = await fetchRepoTree(owner, repo, branch, githubToken);
+    handleGitHubLoad({ owner, repo, branch, tree, truncated, commitSha, defaultBranch: branch });
+  }, [githubToken, handleGitHubLoad]);
+
   const handleRefreshTree = useCallback(() => {
     if (cloudMode && activeProjectId) {
       refreshCloudTree(activeProjectId).catch(e => notify('error', e.message));
@@ -539,6 +588,7 @@ export function useWorkspace({ userId, notify, githubToken, autoSave, editorRef,
     tabs, setTabs, setActiveTabId, tabsRef, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
     buildRunFiles, projectFiles, newProjectFromTemplate, applyRuntimeChanges, listGitChanges,
+    gitOriginal, discardGitChange, commitToGitHub, publishToGitHub, openGitHubRepo,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   };

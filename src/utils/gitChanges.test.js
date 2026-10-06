@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gitBlobSha, baselineFromTree, computeGitChanges } from './gitChanges';
+import { gitBlobSha, baselineFromTree, computeGitChanges, repoNameFrom } from './gitChanges';
 import { withFileChanges } from './files';
 
 describe('gitBlobSha', () => {
@@ -47,5 +47,14 @@ describe('computeGitChanges', () => {
     const baseline = baselineFromTree(original);
     const back = withFileChanges(original, [{ type: 'write', path: 'src/a.js', content: 'hello\n' }]);
     expect(await computeGitChanges(back, baseline)).toEqual([]);
+  });
+});
+
+describe('repoNameFrom', () => {
+  it('turns a project name into a valid repository name', () => {
+    expect(repoNameFrom('My Cool App!')).toBe('my-cool-app');
+    expect(repoNameFrom('React + Vite')).toBe('react-vite');
+    expect(repoNameFrom('...')).toBe('nexide-project');
+    expect(repoNameFrom(undefined)).toBe('nexide-project');
   });
 });
