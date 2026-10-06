@@ -33,15 +33,17 @@ export function GitHubModal({ open, onClose, onLoad, githubToken }) {
     try {
       const info = await fetchRepoInfo(parsed.owner, parsed.repo, githubToken);
       const branch = parsed.branch || info.default_branch || 'main';
-      const { tree, truncated } = await fetchRepoTree(parsed.owner, parsed.repo, branch, githubToken);
+      const { tree, truncated, commitSha } = await fetchRepoTree(parsed.owner, parsed.repo, branch, githubToken);
       onLoad({
         owner: parsed.owner,
         repo:  parsed.repo,
         branch,
         description: info.description,
+        defaultBranch: info.default_branch,
         stars: info.stargazers_count,
         tree,
         truncated,
+        commitSha, // what changes are measured against, and the parent of a commit
       });
       onClose();
       setInput('');

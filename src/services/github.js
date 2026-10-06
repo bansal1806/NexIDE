@@ -43,15 +43,154 @@ export async function fetchRepoInfo(owner, repo, token = null) {
   return res.json();
 }
 
-/** Returns { tree, truncated } for the given branch/ref. */
+const repoUrl = (owner, repo) => `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+
+/**
+ * Returns { tree, truncated, commitSha } for the given branch/ref. Pinned to one commit (ref →
+ * commit → its tree), so what NexIDE shows and the parent of a later commit can't disagree.
+ */
 export async function fetchRepoTree(owner, repo, branch, token = null) {
-  const res = await fetch(
-    `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
-    { headers: headers(token) }
-  );
+  const commitRes = await fetch(`${repoUrl(owner, repo)}/commits/${encodePath(branch)}`, { headers: headers(token) });
+  if (!commitRes.ok) throw await ghError(commitRes, `Branch "${branch}"`);
+  const commit = await commitRes.json();
+  const res = await fetch(`${repoUrl(owner, repo)}/git/trees/${commit.commit.tree.sha}?recursive=1`, { headers: headers(token) });
   if (!res.ok) throw await ghError(res, `Branch "${branch}"`);
   const data = await res.json();
-  return { tree: buildTreeFromFlat(data.tree || []), truncated: !!data.truncated };
+  return { tree: buildTreeFromFlat(data.tree || []), truncated: !!data.truncated, commitSha: commit.sha };
+}
+
+/** A file's content at a given commit (diffs and "discard"): raw for public repos, the API with a token. */
+export async function fetchFileAt(owner, repo, path, commitSha, token = null) {
+  return token
+    ? fetchFileContent(owner, repo, path, commitSha, token)
+    : fetchRawFile(owner, repo, commitSha, path);
+}
+
+// ── Committing ─────────────────────────────────────────────────────
+
+/** Thrown when the branch moved on GitHub since the repo was loaded (someone else pushed). */
+export class StaleBranchError extends Error {
+  constructor(branch) {
+    super(`"${branch}" changed on GitHub since you opened it, so your commit wasn't added to it.`);
+    this.name = 'StaleBranchError';
+    this.branch = branch;
+  }
+}
+
+async function writeError(res, what) {
+  if (res.status === 401) return new Error('GitHub didn’t accept your token. Check it in Settings → GitHub.');
+  if (res.status === 403 || res.status === 404) {
+    return new Error(`Your GitHub token can’t write to this repository (${what}). It needs "Contents: Read and write"` +
+      ' (and "Pull requests: Read and write" for pull requests) for this repo.');
+  }
+  let detail = '';
+  try { detail = (await res.json()).message || ''; } catch { /* no body */ }
+  return new Error(`${what} failed (${res.status}${detail ? `: ${detail}` : ''})`);
+}
+
+/**
+ * Publish files as a new repository in the token owner's account. GitHub's Git Data API doesn't
+ * work on an empty repository, so it's created with an initial README (auto_init) and the files
+ * are committed on top of that (a README among the files replaces it).
+ * files: [{ path, content }]. Resolves to { owner, repo, branch, commitSha, url }.
+ */
+export async function publishRepository({ token, name, description = '', isPrivate = true, files, message = 'Initial commit from NexIDE' }) {
+  if (!token) throw new Error('Add a GitHub token in Settings → GitHub to publish.');
+  if (!NAME.test(name)) throw new Error('Use letters, numbers, ".", "-" or "_" for the repository name.');
+  if (!files.length) throw new Error('There are no files to publish.');
+  const createRes = await fetch(`${GITHUB_API}/user/repos`, {
+    method: 'POST',
+    headers: { ...headers(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description, private: isPrivate, auto_init: true }),
+  });
+  if (createRes.status === 422) throw new Error(`You already have a repository named "${name}". Pick another name.`);
+  if (createRes.status === 401) throw new Error('GitHub didn’t accept your token. Check it in Settings → GitHub.');
+  if (createRes.status === 403 || createRes.status === 404) {
+    throw new Error('Your GitHub token can’t create repositories. Use a token with the "repo" scope (classic), or a' +
+      ' fine-grained token for "All repositories" with "Administration" and "Contents" set to Read and write.');
+  }
+  if (!createRes.ok) throw await writeError(createRes, 'Creating the repository');
+  const created = await createRes.json();
+  const [owner, repo] = created.full_name.split('/');
+  const branch = created.default_branch || 'main';
+
+  // The initial commit (it can take a moment to appear right after creation)
+  let base = null;
+  for (let attempt = 0; attempt < 5 && !base; attempt++) {
+    const res = await fetch(`${repoUrl(owner, repo)}/commits/${encodePath(branch)}`, { headers: headers(token) });
+    if (res.ok) base = (await res.json()).sha;
+    else await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+  }
+  if (!base) throw new Error(`Created ${created.full_name}, but couldn’t read its first commit. Open it from GitHub and commit again.`);
+
+  const changes = files.map(f => ({ path: f.path, status: 'added', content: f.content }));
+  const result = await commitChanges({ owner, repo, token, branch, baseCommitSha: base, changes, message });
+  return { owner, repo, branch, commitSha: result.commitSha, url: created.html_url };
+}
+
+/**
+ * Commit changes on top of `baseCommitSha` through the Git Data API (no git needed):
+ * blobs → tree (base_tree) → commit → move `branch` (never forced), or create `newBranch` and
+ * optionally open a pull request into `branch`.
+ *
+ * changes: [{ path, status: 'modified' | 'added' | 'deleted', content?, mode? }]
+ * Resolves to { commitSha, branch, pullRequestUrl }.
+ */
+export async function commitChanges({ owner, repo, token, branch, baseCommitSha, changes, message, newBranch = null, pullRequest = null }) {
+  if (!token) throw new Error('Add a GitHub token in Settings → GitHub to commit.');
+  if (!changes.length) throw new Error('There are no changes to commit.');
+  const url = repoUrl(owner, repo);
+  const send = (method, path, body) => fetch(`${url}${path}`, {
+    method,
+    headers: { ...headers(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  // The tree the base commit points to
+  const baseRes = await fetch(`${url}/git/commits/${baseCommitSha}`, { headers: headers(token) });
+  if (!baseRes.ok) throw await writeError(baseRes, 'Reading the base commit');
+  const baseTreeSha = (await baseRes.json()).tree.sha;
+
+  // Contents of changed files, a few at a time
+  const entries = [];
+  const writes = changes.filter(c => c.status !== 'deleted');
+  let next = 0;
+  const upload = async () => {
+    while (next < writes.length) {
+      const change = writes[next++];
+      const res = await send('POST', '/git/blobs', { content: change.content, encoding: 'utf-8' });
+      if (!res.ok) throw await writeError(res, `Uploading ${change.path}`);
+      entries.push({ path: change.path, mode: change.mode || '100644', type: 'blob', sha: (await res.json()).sha });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, writes.length) }, upload));
+  for (const change of changes.filter(c => c.status === 'deleted')) {
+    entries.push({ path: change.path, mode: change.mode || '100644', type: 'blob', sha: null });
+  }
+
+  const treeRes = await send('POST', '/git/trees', { base_tree: baseTreeSha, tree: entries });
+  if (!treeRes.ok) throw await writeError(treeRes, 'Creating the tree');
+  const commitRes = await send('POST', '/git/commits', { message, tree: (await treeRes.json()).sha, parents: [baseCommitSha] });
+  if (!commitRes.ok) throw await writeError(commitRes, 'Creating the commit');
+  const commitSha = (await commitRes.json()).sha;
+
+  if (!newBranch) {
+    const refRes = await send('PATCH', `/git/refs/heads/${encodePath(branch)}`, { sha: commitSha, force: false });
+    if (refRes.status === 422) throw new StaleBranchError(branch);
+    if (!refRes.ok) throw await writeError(refRes, `Updating ${branch}`);
+    return { commitSha, branch, pullRequestUrl: null };
+  }
+
+  const createRes = await send('POST', '/git/refs', { ref: `refs/heads/${newBranch}`, sha: commitSha });
+  if (createRes.status === 422) throw new Error(`A branch named "${newBranch}" already exists. Pick another name.`);
+  if (!createRes.ok) throw await writeError(createRes, `Creating branch ${newBranch}`);
+  let pullRequestUrl = null;
+  if (pullRequest) {
+    const prRes = await send('POST', '/pulls', { title: pullRequest.title, body: pullRequest.body || '', head: newBranch, base: branch });
+    if (!prRes.ok) throw await writeError(prRes, 'Opening the pull request');
+    pullRequestUrl = (await prRes.json()).html_url;
+  }
+  return { commitSha, branch: newBranch, pullRequestUrl };
 }
 
 /** Decode base64 file content as UTF-8 (atob alone garbles non-ASCII text). */
