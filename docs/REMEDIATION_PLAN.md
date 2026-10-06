@@ -325,15 +325,19 @@ committing to main: new branch + PR · include "Publish to GitHub".
 - [x] P3 Type collection follows pnpm's layout (transitive deps next to each package's real path).
 - Verification: lint clean · unit 156/156 · E2E 80/80 (a pnpm repo installs in 17 s, pnpm badge, pnpm-lock.yaml).
 
-### 16.3 Push to GitHub
-- [ ] G1 Change tracking against the loaded tree (blob SHAs): modified / added / deleted.
-- [ ] G2 Source Control panel: changed files, Monaco diff view, discard, commit message, target.
-- [ ] G3 Commit via the Git Data API (blobs → tree with base_tree → commit → ref), current branch or new
-  branch + PR (default for main/protected); clear errors.
-- [ ] G4 Branch moved since loading: offer new branch + PR, or reload and re-apply (conflicts listed).
-- [ ] G5 "Sign in with GitHub" via Supabase OAuth (**[YOU]** register a GitHub OAuth App).
-- [ ] G6 Publish a local / cloud / starter project as a new repo.
-- Tests: GitHub mocked in e2e (exact API sequence, stale-branch path); one manual check on a scratch repo.
+### 16.3 Push to GitHub ✅ (except G5) (branch `github-push`)
+- [x] G1 Change tracking the way Git does: a baseline of blob SHAs from the loaded tree; modified when the content's
+  git blob id differs (`gitBlobSha` matches `git hash-object`, incl. non-ASCII), added / deleted otherwise.
+  Repos load pinned to one commit (commits/<branch> → its tree). Saving in a GitHub workspace keeps the change.
+- [x] G2 Git panel (+ activity-bar button): changed files with M/A/D badges, inline Monaco diff against the loaded
+  commit, discard, unsaved-tab warning, commit message, target (default: new branch + PR on main/master).
+- [x] G3 Commit via the Git Data API: blobs → tree on base_tree (modes kept, deletions) → commit (parent = loaded
+  commit) → ref moved without force, or new branch + pull request. Plain errors (token, permissions, taken names).
+- [x] G4 Branch moved since loading: never overwritten; "Put my changes on a new branch + PR".
+- [ ] G5 "Sign in with GitHub" via Supabase OAuth (**[YOU]** register a GitHub OAuth App; then a small change).
+- [x] G6 Publish a local / cloud / starter / scratch project as a new repository (created with an initial commit,
+  files committed on top), then continue there as a GitHub workspace.
+- Verification: lint clean · unit 171/171 · E2E 86/86 (GitHub mocked: exact API sequence, stale branch, publish).
 
 ## Ideas for a later phase
 
