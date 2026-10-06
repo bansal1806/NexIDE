@@ -14,9 +14,11 @@ const LivePreview = lazy(() => import('./LivePreview'));
 // Project mode (WebContainers + xterm) loads only when a Node.js project is open
 const ProjectTerminal = lazy(() => import('./ProjectTerminal'));
 const ProjectPreview  = lazy(() => import('./ProjectPreview'));
+// GitHub workspaces: changes, diffs and commits (pulls in Monaco's diff editor)
+const SourceControl   = lazy(() => import('./SourceControl'));
 const panelLoading = <div className="panel-loading" style={{ padding: 16, color: 'var(--text-muted)' }}>Loading…</div>;
 
-const LABELS = { ai: 'AI' };
+const LABELS = { ai: 'AI', git: 'Git' };
 const label = (id) => LABELS[id] || id.charAt(0).toUpperCase() + id.slice(1);
 const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, style: { height: '100%' } };
 
@@ -56,10 +58,10 @@ export function BottomPanel({ panel, onSelect, onClose, terminal, console: conso
 }
 
 /** Right panel: live preview, AI chat, code map, debugger state. Each section's props are passed through. */
-export function RightPanel({ panel, onSelect, onClose, preview, projectPreview, ai, map, debug, packages }) {
+export function RightPanel({ panel, onSelect, onClose, preview, projectPreview, ai, map, debug, packages, git }) {
   return (
     <div className="right-panel" role="complementary" aria-label="Side panel">
-      <PanelTabs tabs={['preview', 'ai', 'map', 'debug', 'packages']} active={panel} onSelect={onSelect} onClose={onClose} />
+      <PanelTabs tabs={git ? ['git', 'preview', 'ai', 'map', 'debug', 'packages'] : ['preview', 'ai', 'map', 'debug', 'packages']} active={panel} onSelect={onSelect} onClose={onClose} />
       <div className="panel-content">
         <ChunkErrorBoundary name="Panel" key={panel}>
           <Suspense fallback={panelLoading}>
@@ -73,6 +75,7 @@ export function RightPanel({ panel, onSelect, onClose, preview, projectPreview, 
               {panel === 'map' && <motion.div key="map" {...fade}><CodeMap {...map} /></motion.div>}
               {panel === 'debug' && <motion.div key="debug" {...fade}><VariableInspector {...debug} /></motion.div>}
               {panel === 'packages' && <motion.div key="packages" {...fade}><PackagesPanel {...packages} /></motion.div>}
+              {panel === 'git' && git && <motion.div key="git" {...fade}><SourceControl {...git} /></motion.div>}
             </AnimatePresence>
           </Suspense>
         </ChunkErrorBoundary>

@@ -953,3 +953,93 @@ kbd {
   font-weight: 700;
   color: var(--text-primary);
 }
+
+/* =====================================================
+   Source Control (GitHub workspaces)
+   ===================================================== */
+.scm-panel { display: flex; flex-direction: column; gap: 12px; padding: 12px; height: 100%; overflow-y: auto; font-size: 13px; }
+.scm-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-primary); }
+.scm-repo { font-weight: 700; }
+.scm-branch {
+  padding: 1px 9px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.scm-sha { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary); }
+.scm-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.scm-note svg { flex-shrink: 0; margin-top: 3px; color: var(--accent-yellow); }
+.scm-note .btn-clear { flex-shrink: 0; }
+.scm-note.warn { border-color: var(--accent-orange); }
+.scm-section-title { font-family: var(--font-display); font-weight: 600; color: var(--text-primary); }
+.scm-empty { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+.scm-list { list-style: none; display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; }
+.scm-change { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-md); }
+.scm-change.selected, .scm-change:hover { background: var(--bg-elevated); }
+.scm-change-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.scm-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }
+.scm-badge {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.scm-badge.modified { background: var(--accent-yellow); }
+.scm-badge.added { background: var(--accent-green); }
+.scm-badge.deleted { background: var(--accent-red); }
+.scm-diff { border: 2px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.scm-diff-title { padding: 6px 10px; border-bottom: 2px solid var(--border); font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.scm-commit { display: flex; flex-direction: column; gap: 8px; }
+.scm-message, .scm-branch-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  resize: vertical;
+}
+.scm-branch-input { font-family: var(--font-mono); font-size: 12px; }
+.scm-message:focus, .scm-branch-input:focus { border-color: var(--accent-violet); outline: none; }
+.scm-targets { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); }
+.scm-targets label { display: flex; align-items: center; gap: 8px; }
+.scm-targets b { color: var(--text-primary); }
+.scm-targets input[type="radio"] { accent-color: var(--accent-green); }
+.scm-commit-btn { justify-content: center; }
+.scm-error { padding: 10px; border: 2px solid var(--ink); border-radius: var(--radius-md); background: var(--accent-red); color: var(--ink); display: flex; flex-direction: column; gap: 8px; }
+.scm-done { padding: 10px; border: 2px solid var(--ink); border-radius: var(--radius-md); background: var(--accent-green); color: var(--ink); line-height: 1.5; }
+.scm-done a, .scm-error a { color: var(--ink); font-weight: 700; }

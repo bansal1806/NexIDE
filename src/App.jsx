@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useDebugger } from './hooks/useDebugger';
 import { DebugTimeline } from './components/DebugTimeline';
 import {
-  Settings as SettingsIcon, TerminalSquare, Files, Map as MapIcon, MessageSquare,
+  Settings as SettingsIcon, TerminalSquare, Files, Map as MapIcon, MessageSquare, GitBranch,
 } from 'lucide-react';
 import './App.css';
 import './styles/playground.css'; // Playground design layer — must load after App.css
@@ -83,6 +83,7 @@ export default function App() {
     tabs, setTabs, setActiveTabId, activeTab, activeTabRef, liveActiveTab,
     openFileInTab, newFileFromTemplate, handleEditorChange, saveFile, closeTab, hasUnsavedWork,
     buildRunFiles, projectFiles, newProjectFromTemplate, applyRuntimeChanges,
+    listGitChanges, gitOriginal, discardGitChange, commitToGitHub, publishToGitHub, openGitHubRepo,
     handleOpenFolder, handleGitHubLoad, handleOpenCloudProject, handleCreateCloudProject,
     handleNewCloudFile, handleRefreshTree,
   } = useWorkspace({
@@ -350,6 +351,12 @@ export default function App() {
           <button className={`activity-btn ${rightPanel === 'ai' ? 'active' : ''}`} onClick={() => setRightPanel(p => p === 'ai' ? null : 'ai')} title="AI Assistant" aria-label="AI assistant">
             <MessageSquare size={18} />
           </button>
+          {(githubMode || fileTree.length > 0 || tabs.length > 0) && (
+            <button className={`activity-btn ${rightPanel === 'git' ? 'active' : ''}`} id="btn-activity-git" onClick={() => setRightPanel(p => p === 'git' ? null : 'git')}
+              title={githubMode ? 'Source Control' : 'Publish to GitHub'} aria-label={githubMode ? 'Source control' : 'Publish to GitHub'}>
+              <GitBranch size={18} />
+            </button>
+          )}
           <div className="activity-spacer" />
           <button className={`activity-btn ${bottomPanel === 'terminal' ? 'active' : ''}`} onClick={() => setBottomPanel(v => v === 'terminal' ? null : 'terminal')} title="Terminal" aria-label="Terminal">
             <TerminalSquare size={18} />
@@ -493,6 +500,21 @@ export default function App() {
               onApiKeyNeeded: () => setSettingsOpen(true),
             }}
             map={{ activeTab, fileTree, onNodeClick: handleMapNodeClick }}
+            git={githubMode && githubInfo ? {
+              info: githubInfo,
+              hasToken: !!settings.githubToken,
+              theme: ({ aurora: 'nexide-aurora', crimson: 'nexide-crimson', 'vs-dark': 'vs-dark' })[settings.theme] || 'nexide-dark',
+              unsavedNames: tabs.filter(t => t.dirty).map(t => t.name),
+              listGitChanges, gitOriginal, discardGitChange, commitToGitHub,
+              onOpenSettings: () => setSettingsOpen(true),
+            } : (fileTree.length > 0 || tabs.length > 0) ? {
+              mode: 'publish',
+              projectName: rootName || 'nexide-project',
+              hasToken: !!settings.githubToken,
+              onPublish: publishToGitHub,
+              onOpenRepo: (repo) => openGitHubRepo(repo).catch(e => notify('error', `Couldn’t open ${repo.owner}/${repo.repo}: ${e.message}`)),
+              onOpenSettings: () => setSettingsOpen(true),
+            } : null}
             packages={{
               workspaceLabel: rootName || 'Scratch files',
               pins: lockFor(workspaceKey),
